@@ -885,8 +885,11 @@ impl LinkedDistances {
         ret
     }
 
-    pub fn cluster_string_vector_list(mut strings: Vec<(Vec<u8>, usize)>, max_mismatch: &usize) -> Vec<(Vec<u8>, Link<DistanceGraphNode>)> {
+    pub fn cluster_string_vector_list(mut strings: Vec<(Vec<u8>, usize)>, max_mismatch: &usize, minimum_ratio: &f64) -> Vec<(Vec<u8>, Link<DistanceGraphNode>)> {
+        assert!(*minimum_ratio >= 2.0); // this is a bit arbitrary, but it prevents anyone from doing something really dumb here
         strings.sort();
+
+
 
         let mut trie = Trie::new(strings.get(0).unwrap().0.len());
 
@@ -915,7 +918,7 @@ impl LinkedDistances {
             }
         });
 
-        linked_dist.message_passing_collpase(&5.0)
+        linked_dist.message_passing_collpase(minimum_ratio)
     }
 }
 
@@ -1098,7 +1101,7 @@ mod tests {
     fn test_error_unambiguous_sequences() {
         let strings = read_file_to_vec("python/Anchored_error_20mer_set.txt").unwrap();
 
-        let hit_set = LinkedDistances::cluster_string_vector_list(strings,&1);
+        let hit_set = LinkedDistances::cluster_string_vector_list(strings,&1, &5.0);
 
         // either hits are non error, which should be 120 read counts (100 original reads plus 20 more singletons collapsed into it) or error singletons (1 read)
         for hit in hit_set {
