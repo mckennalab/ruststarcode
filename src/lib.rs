@@ -29,7 +29,6 @@ static GLOBAL: Jemalloc = Jemalloc;
 /// * `T` - The wrapped type, which must implement `Hash`, `PartialEq`, `Eq`, and `Debug`.
 pub struct Link<T: Hash + PartialEq + Eq + Debug>(Rc<RefCell<T>>);
 
-
 impl<T: Hash + PartialEq + Eq + Debug> Deref for Link<T> {
     type Target = Rc<RefCell<T>>;
     
@@ -95,10 +94,10 @@ impl<T: Hash + PartialEq + Eq + Debug> PartialEq for Link<T> {
 pub struct TrieNode {
     /// Children keyed by character. For DNA you might prefer a 4-element array (A,C,G,T),
     /// but using a HashMap<char, TrieNode> is more general.
-    children: HashMap<u8, Rc<RefCell<TrieNode>>>,
+    pub children: HashMap<u8, Rc<RefCell<TrieNode>>>,
 
     /// Reference to the parent node, allowing traversal up the trie.
-    parent: Option<Weak<RefCell<TrieNode>>>,
+    pub parent: Option<Weak<RefCell<TrieNode>>>,
 
     /// Tracks if this node has been visited in the current traversal.
     /// Used to avoid processing the same node multiple times.
@@ -683,12 +682,12 @@ impl Trie {
 
 #[derive(Debug)]
 pub struct DistanceGraphNode {
-    string: Vec<u8>,
-    count: usize,
-    valid: bool, // used in the collapsing step
-    links: HashMap<Vec<u8>, Weak<RefCell<DistanceGraphNode>>>,
-    original_link_count: usize,
-    swallowed_links: Vec<(Vec<u8>, usize)>,
+    pub string: Vec<u8>,
+    pub count: usize,
+    pub valid: bool, // used in the collapsing step
+    pub links: HashMap<Vec<u8>, Weak<RefCell<DistanceGraphNode>>>,
+    pub original_link_count: usize,
+    pub swallowed_links: Vec<(Vec<u8>, usize)>,
 }
 
 impl DistanceGraphNode {
