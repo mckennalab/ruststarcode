@@ -725,7 +725,7 @@ impl Eq for DistanceGraphNode {}
 ///
 /// This structure is used to build and analyze a graph where nodes represent
 /// sequences and edges represent edit distances between them.
-struct LinkedDistances {
+pub struct LinkedDistances {
     /// Map from sequence to node, with shared ownership.
     nodes: HashMap<Vec<u8>, Link<DistanceGraphNode>>,
 }
@@ -878,6 +878,46 @@ impl LinkedDistances {
         }
         false
     }
+
+    fn prefix_overlap_str(a: &[u8], b: &[u8]) -> usize {
+        let ret = a.iter().zip(b.iter())
+            .take_while(|(ac, bc)| **ac == **bc)
+            .count();
+        ret
+    }
+
+    fn cluster_string_vector_list(mut strings: Vec<(Vec<u8>, usize)>, max_mismatch: &usize) -> Vec<(Vec<u8>, Link<DistanceGraphNode>)> {
+        strings.sort();
+
+        let mut trie = Trie::new(strings.get(0).unwrap().0.len());
+
+        let mut search_nodes = HashSet::default();
+        search_nodes.extend(trie.insert(&strings[0].0, Some(1) /* return the first level of the tree */, &max_mismatch));
+
+        // now make a LinkedDistances with the nodes
+        let mut linked_dist = LinkedDistances::new_from_counts(&strings);
+
+        (1..strings.len()).for_each(|x| {
+            let start = if x > 1 { LinkedDistances::prefix_overlap_str(&strings[x].0, &strings[x - 1].0) } else { 0 };
+            let mut future = if x < strings.len() - 1 { LinkedDistances::prefix_overlap_str(&strings[x + 1].0, &strings[x].0) } else { 0 };
+
+            if search_nodes.len() == 0 {
+                search_nodes = trie.depth_links.get(&1).unwrap().clone().into_iter().collect();
+            }
+
+            if start < strings[0].0.len() {
+                let rt = trie.chained_search(start, Some(future), &strings[x].0, &max_mismatch, &search_nodes);
+                search_nodes = rt.1;
+                linked_dist.add_links(&strings[x].0, &rt.0);
+
+                if future < 1 { future = 1; }
+
+                search_nodes.extend(trie.insert(&strings[x].0, Some(future), &max_mismatch));
+            }
+        });
+
+        linked_dist.message_passing_collpase(&5.0)
+    }
 }
 
 
@@ -980,19 +1020,12 @@ mod tests {
         }
     }
 
-    fn prefix_overlap_str(a: &[u8], b: &[u8]) -> usize {
-        let ret = a.iter().zip(b.iter())
-            .take_while(|(ac, bc)| **ac == **bc)
-            .count();
-        //println!("str 1 {} str 2 {} len {}",String::from_utf8(a.to_vec()).unwrap(),String::from_utf8(b.to_vec()).unwrap(),ret);
-        ret
-    }
 
     #[test]
     fn test_overlap_strings() {
         let str1 = vec![b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'G', b'G'];
         let str2 = vec![b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'T', b'T'];
-        assert_eq!(prefix_overlap_str(str1.as_slice(), str2.as_slice()), 10);
+        assert_eq!(LinkedDistances::prefix_overlap_str(str1.as_slice(), str2.as_slice()), 10);
     }
 
     #[allow(dead_code)]
@@ -1063,54 +1096,22 @@ mod tests {
     }
 
     #[test]
-    fn test_four_nucleotides_with_built_in_errors() {
-        let mut strings = read_file_to_vec("python/two_mer_sequences_20.txt").unwrap();
-        //let mut strings = read_file_to_vec("python/four_mer_sequences_degenerate_all.txt").unwrap();
-        strings.sort();
+    fn test_error_unambiguous_sequences() {
+        let mut strings = read_file_to_vec("python/Anchored_error_20mer_set.txt").unwrap();
 
-        // fiter out any duplicates
+        let hit_set = LinkedDistances::cluster_string_vector_list(strings,&1);
 
-        let mut trie = Trie::new(strings.get(0).unwrap().0.len());
-        let max_mismatch = 1;
-        let mut search_nodes = HashSet::default();
-        search_nodes.extend(trie.insert(&strings[0].0, Some(1), &max_mismatch));
-
-        // now make a LinkedDistances with the nodes
-        let mut linked_dist = LinkedDistances::new_from_counts(&strings);
-
-        let mut hits = 0;
-        (1..strings.len()).for_each(|x| {
-            let start = if x > 1 { prefix_overlap_str(&strings[x].0, &strings[x - 1].0) } else { 0 };
-            let mut future = if x < strings.len() - 1 { prefix_overlap_str(&strings[x + 1].0, &strings[x].0) } else { 0 };
-
-            //println!("{} start {} future {}",String::from_utf8(strings[x].0.clone()).unwrap(),start,future);
-
-            if search_nodes.len() == 0 {
-                search_nodes = trie.depth_links.get(&1).unwrap().clone().into_iter().collect();
+        // either hits are non error, which should be 120 read counts (100 original reads plus 20 more singletons collapsed into it) or error singletons (1 read)
+        for hit in hit_set {
+            if hit.1.borrow().count == 120 {
+                assert!(hit.1.borrow().valid);
+            } else if hit.1.borrow().count == 1 {
+                //println!("Hit {} {} {} len {}",String::from_utf8(hit.1.borrow().string.clone()).unwrap(),hit.1.borrow().count,hit.1.borrow().valid,hit.1.borrow().links.len());
+                assert!(!hit.1.borrow().valid);
+            } else {
+                panic!("Unknown result; counts {}",hit.1.borrow().count);
             }
-
-            if start < strings[0].0.len() {
-                let rt = trie.chained_search(start, Some(future), &strings[x].0, &max_mismatch, &search_nodes);
-                search_nodes = rt.1;
-                hits += rt.0.len();
-                linked_dist.add_links(&strings[x].0, &rt.0);
-
-                if future < 1 {
-                    future = 1;
-                }
-
-                if x % 10000 == 0 {
-                    println!("Strings len {}", x);
-                }
-
-                search_nodes.extend(trie.insert(&strings[x].0, Some(future), &max_mismatch));
-            }
-        });
-
-        println!("hits {} string length {}", hits, strings.len());
-
-        let _hit_set = linked_dist.message_passing_collpase(&5.0);
-
+        }
     }
 
 
