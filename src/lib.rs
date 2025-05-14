@@ -682,7 +682,7 @@ impl Trie {
 
 
 #[derive(Debug)]
-struct DistanceGraphNode {
+pub struct DistanceGraphNode {
     string: Vec<u8>,
     count: usize,
     valid: bool, // used in the collapsing step
@@ -742,7 +742,7 @@ impl LinkedDistances {
     /// # Parameters
     ///
     /// * `strings_and_counts` - Vector of (sequence, count) pairs.
-    pub fn new_from_counts(strings_and_counts: &Vec<(Vec<u8>, usize)>) -> LinkedDistances {
+    fn new_from_counts(strings_and_counts: &Vec<(Vec<u8>, usize)>) -> LinkedDistances {
         let mut nodes: HashMap<Vec<u8>, Link<DistanceGraphNode>> = HashMap::default();
 
         for snc in strings_and_counts {
@@ -760,7 +760,7 @@ impl LinkedDistances {
     /// * `string` - The sequence for the new node.
     /// * `count` - The count or frequency of this sequence.
     #[allow(dead_code)]
-    pub fn add_node(&mut self, string: &Vec<u8>, count: &usize) {
+    fn add_node(&mut self, string: &Vec<u8>, count: &usize) {
         assert!(!self.nodes.contains_key(string));
 
         let node = Link { 0: Rc::new(RefCell::new(DistanceGraphNode::new(string, count))) };
@@ -773,7 +773,7 @@ impl LinkedDistances {
     ///
     /// * `from` - The source sequence.
     /// * `to_nodes` - Vector of (target sequence, edit distance) pairs.
-    pub fn add_links(&mut self, from: &Vec<u8>, to_nodes: &Vec<(Vec<u8>,usize)>) {
+    fn add_links(&mut self, from: &Vec<u8>, to_nodes: &Vec<(Vec<u8>,usize)>) {
         //println!("From {}",String::from_utf8(from.to_vec()).unwrap());
         assert!(self.nodes.contains_key(from));
 
@@ -808,7 +808,7 @@ impl LinkedDistances {
     /// # Returns
     ///
     /// A vector of (sequence, node) pairs representing the collapsed graph.
-    pub fn message_passing_collpase(self, minimum_ratio: &f64) -> Vec<(Vec<u8>, Link<DistanceGraphNode>)> {
+    fn message_passing_collpase(self, minimum_ratio: &f64) -> Vec<(Vec<u8>, Link<DistanceGraphNode>)> {
 
         let mut sorted: Vec<_> = self.nodes.into_iter().collect();
 
@@ -832,7 +832,7 @@ impl LinkedDistances {
         sorted
     }
 
-    pub fn message_passing_check(link: &mut Rc<RefCell<DistanceGraphNode>>, minimum_ratio: &f64) -> bool {
+    fn message_passing_check(link: &mut Rc<RefCell<DistanceGraphNode>>, minimum_ratio: &f64) -> bool {
         let my_count = link.borrow().count;
         let link_size = link.borrow().links.len();
 
@@ -886,7 +886,7 @@ impl LinkedDistances {
         ret
     }
 
-    fn cluster_string_vector_list(mut strings: Vec<(Vec<u8>, usize)>, max_mismatch: &usize) -> Vec<(Vec<u8>, Link<DistanceGraphNode>)> {
+    pub fn cluster_string_vector_list(mut strings: Vec<(Vec<u8>, usize)>, max_mismatch: &usize) -> Vec<(Vec<u8>, Link<DistanceGraphNode>)> {
         strings.sort();
 
         let mut trie = Trie::new(strings.get(0).unwrap().0.len());
@@ -1097,7 +1097,7 @@ mod tests {
 
     #[test]
     fn test_error_unambiguous_sequences() {
-        let mut strings = read_file_to_vec("python/Anchored_error_20mer_set.txt").unwrap();
+        let strings = read_file_to_vec("python/Anchored_error_20mer_set.txt").unwrap();
 
         let hit_set = LinkedDistances::cluster_string_vector_list(strings,&1);
 
