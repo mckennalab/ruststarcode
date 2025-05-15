@@ -410,22 +410,10 @@ pub struct Trie {
     
     /// Maximum depth of the trie.
     pub max_height: usize,
-    
-    /// Maps sequences to their unique identifier.
-    sequence_to_id: HashMap<Vec<u8>, usize>,
-    
-    /// Maps identifiers back to their sequences.
-    id_to_sequence: HashMap<usize, Vec<u8>>,
-    
+
     /// Stores nodes by their depth level for efficient level-based traversal.
     depth_links: HashMap<usize, Vec<Link<TrieNode>>>,
-    
-    /// Counter for assigning sequence identifiers.
-    seq_index: usize,
-    
-    /// Counter for tracking the number of searches performed.
-    searches_performed: usize,
-    
+
     /// Current iteration number for search operations.
     iteration: usize,
 }
@@ -437,46 +425,15 @@ impl Trie {
     ///
     /// * `max_height` - The maximum depth of the trie.
     pub fn new(max_height: usize) -> Self {
-        let sequence_to_id: HashMap<Vec<u8>, usize> = HashMap::default();
-        let id_to_sequence: HashMap<usize, Vec<u8>> = HashMap::default();
         let str: Vec<u8> = Vec::new();
         Trie {
-            root: Link { 0: Rc::new(RefCell::new(TrieNode::new(str, None, &0))) }, //, //Rc::new(RefCell::new(TrieNode::new(0, 0))),
+            root: Link { 0: Rc::new(RefCell::new(TrieNode::new(str, None, &0))) },
             max_height,
-            sequence_to_id,
-            id_to_sequence,
             depth_links: HashMap::default(),
-            seq_index: 1,
-            searches_performed: 0,
             iteration: 1,
         }
     }
 
-    /// Adds a sequence to the sequence maps and returns its identifier.
-    ///
-    /// If the sequence already exists, returns its existing identifier.
-    ///
-    /// # Parameters
-    ///
-    /// * `seq` - The sequence to add.
-    ///
-    /// # Returns
-    ///
-    /// The unique identifier for the sequence.
-    pub fn add_sequence(&mut self, seq: &[u8]) -> usize {
-        let string_rep = Vec::from(seq);
-        let hit = self.sequence_to_id.get(&string_rep);
-        match hit {
-            None => {
-                self.sequence_to_id.insert(string_rep.clone(), self.seq_index);
-                self.id_to_sequence.insert(self.seq_index, string_rep);
-
-                self.seq_index += 1;
-                self.seq_index - 1
-            }
-            Some(x) => { *x }
-        }
-    }
 
     /// Inserts a sequence into the trie and returns relevant nodes.
     ///
@@ -526,10 +483,6 @@ impl Trie {
 
                 self.depth_links.entry(i).or_insert_with(Vec::new).push(Link { 0: Rc::clone(&current_node) });
             }
-
-            if i + 1 == self.max_height {
-                break;
-            }
         }
 
 
@@ -563,6 +516,14 @@ impl Trie {
                       sequence: &[u8],
                       max_mistaches: &usize,
                       search_nodes : &HashSet<Link<TrieNode>>) -> (Vec<(Vec<u8>,usize)>, HashSet<Link<TrieNode>>) {
+
+        assert!(sequence.len() <= self.max_height);
+
+        // create an all-padded string, and then copy over the passed in sequence
+        let mut string_rep = vec![b'-'; self.max_height];
+        string_rep[0..sequence.len()].copy_from_slice(sequence);
+
+
         let mut hits: Vec<(Vec<u8>,usize)> = Vec::new();
         let mut pebbles: Vec<Link<TrieNode>> = Vec::new(); //HashSet::default();
 
@@ -577,11 +538,8 @@ impl Trie {
             if current_node.borrow().visited < self.iteration { // && current_node.borrow().depth >= start_depth {
                 let current_node_depth = current_node.borrow().depth;
         
-                current_node.borrow_mut().fill_alignment_from_parent(&(current_node_depth), sequence, max_mistaches);
+                current_node.borrow_mut().fill_alignment_from_parent(&(current_node_depth), string_rep.as_slice(), max_mistaches);
                 current_node.borrow_mut().visited = self.iteration;
-        
-                self.searches_performed += 1;
-
 
                 if future_depth.is_some() && current_node_depth < future_depth.unwrap() {
                     pebbles.push(Link { 0: Rc::clone(&current_node) });
@@ -933,6 +891,7 @@ mod tests {
     extern crate rand;
 
     use rand::prelude::*;
+    use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 
     #[allow(dead_code)]
@@ -1095,6 +1054,22 @@ mod tests {
         }
 
         Ok(results.into_iter().collect())
+    }
+
+
+    #[test]
+    fn test_adding_unpadded_string_to_tree() {
+        let mut tree = Trie::new(10);
+        tree.insert("ACGTACGTA".as_bytes(),Some(1),&1);
+        let hs = HashSet::default();
+        let st = tree.chained_search(1, Some(1), "ACGTACGTA".as_bytes(), &2, &hs);
+        assert_eq!(st.0.len(), 1);
+        tree.insert("ACGTACGTC".as_bytes(),Some(1),&1);
+
+        let st = tree.chained_search(1, Some(1), "ACGTACGTAA".as_bytes(), &2, &hs);
+        assert_eq!(st.0.len(), 2);
+
+
     }
 
     #[test]
