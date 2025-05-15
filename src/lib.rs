@@ -599,7 +599,6 @@ impl Trie {
         let mut search_nodes = Vec::new();
         search_nodes.push(self.root.clone());
 
-        //println!("explore depth {}",search_nodes.len());
         while !search_nodes.is_empty() {
             let current_node = search_nodes.pop().unwrap();
 
@@ -626,7 +625,6 @@ impl Trie {
         let mut search_nodes = Vec::new();
         search_nodes.push(self.root.clone());
 
-        //println!("explore depth {}",search_nodes.len());
         while !search_nodes.is_empty() {
             let current_node = search_nodes.pop().unwrap();
             for child in &current_node.borrow().children {
@@ -704,7 +702,6 @@ impl LinkedDistances {
 
         for snc in strings_and_counts {
             let dgn = Rc::new(RefCell::new(DistanceGraphNode::new(&snc.0, &snc.1.clone())));
-            //println!("Insert {}",String::from_utf8(snc.0.clone().to_vec()).unwrap());
             nodes.insert(snc.0.clone(), Link { 0: dgn });
         }
         LinkedDistances { nodes }
@@ -731,7 +728,6 @@ impl LinkedDistances {
     /// * `from` - The source sequence.
     /// * `to_nodes` - Vector of (target sequence, edit distance) pairs.
     fn add_links(&mut self, from: &Vec<u8>, to_nodes: &Vec<(Vec<u8>,usize)>) {
-        //println!("From {}",String::from_utf8(from.to_vec()).unwrap());
         assert!(self.nodes.contains_key(from));
 
 
@@ -1069,7 +1065,15 @@ mod tests {
         let st = tree.chained_search(1, Some(1), "ACGTACGTAA".as_bytes(), &2, &hs);
         assert_eq!(st.0.len(), 2);
 
+        tree.insert("ACGTACGT-".as_bytes(),Some(1),&1);
+        let st = tree.chained_search(1, Some(1), "ACGTACGTA-".as_bytes(), &2, &hs);
+        assert_eq!(st.0.len(), 3);
+        //st.0.iter().for_each(|x| println!("key {}",String::from_utf8(x.0.clone()).unwrap()));
 
+        tree.insert("ACGTACG--".as_bytes(),Some(1),&1);
+        let st = tree.chained_search(1, Some(1), "ACGTACGTA-".as_bytes(), &1, &hs);
+        assert_eq!(st.0.len(), 3);
+        //st.0.iter().for_each(|x| println!("key after double gap {}",String::from_utf8(x.0.clone()).unwrap()));
     }
 
     #[test]
@@ -1083,7 +1087,6 @@ mod tests {
             if hit.1.borrow().count == 120 {
                 assert!(hit.1.borrow().valid);
             } else if hit.1.borrow().count == 1 {
-                //println!("Hit {} {} {} len {}",String::from_utf8(hit.1.borrow().string.clone()).unwrap(),hit.1.borrow().count,hit.1.borrow().valid,hit.1.borrow().links.len());
                 assert!(!hit.1.borrow().valid);
             } else {
                 panic!("Unknown result; counts {}",hit.1.borrow().count);
