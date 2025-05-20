@@ -20,18 +20,18 @@ use tikv_jemallocator::Jemalloc;
 static GLOBAL: Jemalloc = Jemalloc;
 
 /// A wrapper around an `Rc<RefCell<T>>` that implements additional traits.
-/// 
+///
 /// This structure provides a convenient way to share ownership of a mutable value
 /// while maintaining reference semantics for hashing and equality comparison.
-/// 
+///
 /// # Type Parameters
-/// 
+///
 /// * `T` - The wrapped type, which must implement `Hash`, `PartialEq`, `Eq`, and `Debug`.
 pub struct Link<T: Hash + PartialEq + Eq + Debug>(Rc<RefCell<T>>);
 
 impl<T: Hash + PartialEq + Eq + Debug> Deref for Link<T> {
     type Target = Rc<RefCell<T>>;
-    
+
     /// Dereferences to the inner `Rc<RefCell<T>>`.
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -40,7 +40,7 @@ impl<T: Hash + PartialEq + Eq + Debug> Deref for Link<T> {
 
 impl<T: Hash + PartialEq + Eq + Debug> Hash for Link<T> {
     /// Hashes the inner value by borrowing it.
-    /// 
+    ///
     /// This implementation ensures that the hash is based on the contained value,
     /// not on the memory address of the `Rc`.
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -141,11 +141,11 @@ impl Eq for TrieNode {}
 #[derive(Debug, Clone)]
 pub struct PartialNW {
     /// Column values in the dynamic programming matrix (contains the corner element).
-    column: Vec<usize>, 
-    
+    column: Vec<usize>,
+
     /// Row values in the dynamic programming matrix.
     row: Vec<usize>,
-    
+
     /// The best alignment score found so far.
     best_value: usize,
 }
@@ -235,11 +235,11 @@ impl TrieNode {
     /// * `search_sequence` - The sequence being searched for.
     /// * `max_mismatch` - The maximum allowed edit distance.
     pub fn fill_alignment_from_parent(&mut self,
-                                     offset_x: &usize,
-                                     search_sequence: &[u8],
-                                     max_mismatch: &usize) {
+                                      offset_x: &usize,
+                                      search_sequence: &[u8],
+                                      max_mismatch: &usize) {
         // the order is important - row then column
-       let parent_node = match self.parent.as_ref() {
+        let parent_node = match self.parent.as_ref() {
             None => { panic!("Unable to unwrap node at depth {}", self.depth) }
             Some(x) => { x.upgrade() }
         }.unwrap();
@@ -259,15 +259,14 @@ impl TrieNode {
     /// * `search_sequence` - The sequence being searched for.
     /// * `max_mismatch` - The maximum allowed edit distance.
     pub fn fill_alignment(&mut self,
-                         row_and_column_basis: &PartialNW,
-                         node_offset_x: &usize, // This is the node offset into the tree -- i.e. offset 1 == position 0 in the string
-                         search_sequence: &[u8],
-                         max_mismatch: &usize) {
-        
+                          row_and_column_basis: &PartialNW,
+                          node_offset_x: &usize, // This is the node offset into the tree -- i.e. offset 1 == position 0 in the string
+                          search_sequence: &[u8],
+                          max_mismatch: &usize) {
+
         // the order is important - row then column
         self.fill_row_from_partial_nw(row_and_column_basis, node_offset_x, search_sequence, max_mismatch);
         self.fill_column_from_partial_nw(row_and_column_basis, node_offset_x, search_sequence, max_mismatch);
-        
     }
 
     /// Fills the row of the partial alignment matrix.
@@ -282,10 +281,10 @@ impl TrieNode {
     /// * `search_sequence` - The sequence being searched for.
     /// * `max_mismatch` - The maximum allowed edit distance.
     fn fill_row_from_partial_nw(&mut self,
-                               row_and_column_basis: &PartialNW,
-                               node_offset_x: &usize, // This is the node offset into the tree -- i.e. offset 1 == position 0 in the string
-                               search_sequence: &[u8],
-                               max_mismatch: &usize) {
+                                row_and_column_basis: &PartialNW,
+                                node_offset_x: &usize, // This is the node offset into the tree -- i.e. offset 1 == position 0 in the string
+                                search_sequence: &[u8],
+                                max_mismatch: &usize) {
 
 
         // it's a little confusing -- we can either be in the part of the matrix where each row / column grows by one vs the
@@ -306,7 +305,7 @@ impl TrieNode {
 
         let search_char = search_sequence[*node_offset_x - 1];
         let comparison_slice = &self.sequence[node_offset_x - new_row.len()..*node_offset_x];
-        
+
         (1..new_row.len()).for_each(|i| {
             let match_mismatched = match search_char == comparison_slice[i - 1] {
                 true => { 0 }
@@ -347,10 +346,10 @@ impl TrieNode {
     /// * `search_sequence` - The sequence being searched for.
     /// * `max_mismatch` - The maximum allowed edit distance.
     fn fill_column_from_partial_nw(&mut self,
-                                  row_and_column_basis: &PartialNW,
-                                  node_offset_x: &usize,
-                                  search_sequence: &[u8],
-                                  max_mismatch: &usize) {
+                                   row_and_column_basis: &PartialNW,
+                                   node_offset_x: &usize,
+                                   search_sequence: &[u8],
+                                   max_mismatch: &usize) {
 
         // this function must be called after the row is filled in
 
@@ -362,11 +361,11 @@ impl TrieNode {
             previous_rc_basis_offset = 1;
             new_column = vec![*node_offset_x; *node_offset_x + 1];
         }
-        
+
         let mut best_value = usize::MAX;
 
         let this_char = self.sequence[*node_offset_x - 1];
-        
+
         let comparison_slice = &search_sequence[(node_offset_x + 1) - new_column.len()..*node_offset_x];
 
         (1..new_column.len()).for_each(|i| {
@@ -378,7 +377,7 @@ impl TrieNode {
             let gap_left = if i == new_column.len() - 1 { 1 + self.partial_dp.row[self.partial_dp.row.len() - 1] } else { 1 + row_and_column_basis.column[(i + 1) - previous_rc_basis_offset] };
             let gap_up = 1 + new_column[i - 1];
 
-        
+
             if match_mismatched <= gap_left && match_mismatched <= gap_up {
                 new_column[i] = match_mismatched;
                 best_value = best_value.min(match_mismatched);
@@ -407,7 +406,7 @@ impl TrieNode {
 pub struct Trie {
     /// Root node of the trie.
     root: Link<TrieNode>,
-    
+
     /// Maximum depth of the trie.
     pub max_height: usize,
 
@@ -459,7 +458,6 @@ impl Trie {
         for i in 0..seq.len() {
             let ch = seq[i];
 
-
             if current_node.borrow().children.contains_key(&ch) {
                 let pointer_node = Rc::clone(current_node.borrow().children.get(&ch).unwrap());
                 if depth_to_return.is_some() && depth_to_return.unwrap() == current_node.borrow().depth {
@@ -497,6 +495,9 @@ impl Trie {
     /// partial dynamic programming matrices to efficiently find sequences within
     /// a specified edit distance.
     ///
+    /// Given the nature of this search process, this method is full of edge-case detection to
+    /// keep things fast and could still suffer from unmissed cases.
+    ///
     /// # Parameters
     ///
     /// * `start_depth` - The depth at which to start the search.
@@ -515,8 +516,7 @@ impl Trie {
                       future_depth: Option<usize>,
                       sequence: &[u8],
                       max_mistaches: &usize,
-                      search_nodes : &HashSet<Link<TrieNode>>) -> (Vec<(Vec<u8>,usize)>, HashSet<Link<TrieNode>>) {
-
+                      search_nodes: &HashSet<Link<TrieNode>>) -> (Vec<(Vec<u8>, usize)>, HashSet<Link<TrieNode>>) {
         assert!(sequence.len() <= self.max_height);
 
         // create an all-padded string, and then copy over the passed in sequence
@@ -524,7 +524,7 @@ impl Trie {
         string_rep[0..sequence.len()].copy_from_slice(sequence);
 
 
-        let mut hits: Vec<(Vec<u8>,usize)> = Vec::new();
+        let mut hits: Vec<(Vec<u8>, usize)> = Vec::new();
         let mut pebbles: Vec<Link<TrieNode>> = Vec::new(); //HashSet::default();
 
         let mut current_search_pile: Vec<Link<TrieNode>> = if start_depth < 2 {
@@ -535,19 +535,22 @@ impl Trie {
 
         while !current_search_pile.is_empty() {
             let current_node = current_search_pile.pop().unwrap();
+            //println!("Trying to fill the current search depth with --{}--",String::from_utf8(current_node.borrow().sequence.clone()).unwrap());
             if current_node.borrow().visited < self.iteration { // && current_node.borrow().depth >= start_depth {
                 let current_node_depth = current_node.borrow().depth;
-        
+
                 current_node.borrow_mut().fill_alignment_from_parent(&(current_node_depth), string_rep.as_slice(), max_mistaches);
                 current_node.borrow_mut().visited = self.iteration;
 
                 if future_depth.is_some() && current_node_depth < future_depth.unwrap() {
+                    //println!("pushing --{}--",String::from_utf8(current_node.borrow().sequence.clone()).unwrap());
+
                     pebbles.push(Link { 0: Rc::clone(&current_node) });
                 }
 
                 if current_node.borrow().partial_dp.best_value <= *max_mistaches {
                     if current_node.borrow().is_terminal {
-                        hits.push((current_node.borrow().sequence.clone(),current_node.borrow().partial_dp.best_value));
+                        hits.push((current_node.borrow().sequence.clone(), current_node.borrow().partial_dp.best_value));
                     } else if current_node.borrow().children.len() > 0 {
 
                         // we're not at the end and children exist, for each child update the DP matrix and add to the pile
@@ -557,6 +560,7 @@ impl Trie {
                     }
                 } else {
                     // we're not going to explore it anymore, but future nodes may need the link
+                    //println!("pushing 2 --{}--",String::from_utf8(current_node.borrow().sequence.clone()).unwrap());
                     pebbles.push(Link { 0: Rc::clone(&current_node.0) });
                 }
             }
@@ -564,17 +568,20 @@ impl Trie {
 
         // now for each search node, walk back to the future point
         if future_depth.is_some() && future_depth.unwrap() < start_depth {
-            let target_depth = if future_depth.unwrap() < *max_mistaches {1} else {future_depth.unwrap() - (max_mistaches)};
+            let target_depth = if future_depth.unwrap() < *max_mistaches { 1 } else { future_depth.unwrap() - (max_mistaches) };
 
             let mut return_pebbles: HashSet<Link<crate::TrieNode>> = HashSet::default();
             pebbles.extend(search_nodes.iter().map(|x| Link { 0: Rc::clone(&x.0) }));
 
             for nd in pebbles.into_iter() {
                 let mut nd_pointer = nd.0.clone();
-                while nd_pointer.borrow().depth > target_depth {
+
+                // walk back up the tree until we've reached the target depth or the depth will be 1 (don't walk back to the root)
+                while nd_pointer.borrow().depth > target_depth && nd_pointer.borrow().depth > 1 {
                     nd_pointer = Rc::clone(&nd_pointer).borrow_mut().parent.as_ref().unwrap().upgrade().unwrap().clone();
                 }
-                return_pebbles.insert(Link { 0: nd_pointer });
+
+                    return_pebbles.insert(Link { 0: nd_pointer });
             }
             self.iteration += 1;
             (hits, return_pebbles)
@@ -727,12 +734,11 @@ impl LinkedDistances {
     ///
     /// * `from` - The source sequence.
     /// * `to_nodes` - Vector of (target sequence, edit distance) pairs.
-    fn add_links(&mut self, from: &Vec<u8>, to_nodes: &Vec<(Vec<u8>,usize)>) {
+    fn add_links(&mut self, from: &Vec<u8>, to_nodes: &Vec<(Vec<u8>, usize)>) {
         assert!(self.nodes.contains_key(from));
 
-
         let from_node = Rc::clone(self.nodes.get(from).as_ref().unwrap());
-        for (to_node_name,_count) in to_nodes {
+        for (to_node_name, _count) in to_nodes {
             assert!(self.nodes.contains_key(to_node_name));
             assert_ne!(to_node_name, from);
             let to_node = Rc::clone(self.nodes.get(to_node_name).as_ref().unwrap());
@@ -762,7 +768,6 @@ impl LinkedDistances {
     ///
     /// A vector of (sequence, node) pairs representing the collapsed graph.
     fn message_passing_collpase(self, minimum_ratio: &f64) -> Vec<(Vec<u8>, Link<DistanceGraphNode>)> {
-
         let mut sorted: Vec<_> = self.nodes.into_iter().collect();
 
         sorted.sort_by(|a, b| a.1.borrow().count.cmp(&b.1.borrow().count)); // sort by value descending
@@ -800,7 +805,6 @@ impl LinkedDistances {
             let highest_connection = link1.links.iter().max_by_key(|&(_k, v)| v.upgrade().unwrap().borrow().count).unwrap();
 
             if highest_connection.1.upgrade().unwrap().borrow().count as f64 / my_count as f64 > *minimum_ratio {
-
                 link1.links.iter().for_each(|dist_link| {
                     let dist = dist_link.1.upgrade().unwrap();
                     dist.borrow_mut().links.remove(&link_name);
@@ -842,7 +846,6 @@ impl LinkedDistances {
     pub fn cluster_string_vector_list(mut strings: Vec<(Vec<u8>, usize)>, max_mismatch: &usize, minimum_ratio: &f64) -> Vec<(Vec<u8>, Link<DistanceGraphNode>)> {
         assert!(*minimum_ratio >= 2.0); // this is a bit arbitrary, but it prevents anyone from doing something really dumb here
         strings.sort();
-
 
 
         let mut trie = Trie::new(strings.get(0).unwrap().0.len());
@@ -1056,21 +1059,21 @@ mod tests {
     #[test]
     fn test_adding_unpadded_string_to_tree() {
         let mut tree = Trie::new(10);
-        tree.insert("ACGTACGTA".as_bytes(),Some(1),&1);
+        tree.insert("ACGTACGTA".as_bytes(), Some(1), &1);
         let hs = HashSet::default();
         let st = tree.chained_search(1, Some(1), "ACGTACGTA".as_bytes(), &2, &hs);
         assert_eq!(st.0.len(), 1);
-        tree.insert("ACGTACGTC".as_bytes(),Some(1),&1);
+        tree.insert("ACGTACGTC".as_bytes(), Some(1), &1);
 
         let st = tree.chained_search(1, Some(1), "ACGTACGTAA".as_bytes(), &2, &hs);
         assert_eq!(st.0.len(), 2);
 
-        tree.insert("ACGTACGT-".as_bytes(),Some(1),&1);
+        tree.insert("ACGTACGT-".as_bytes(), Some(1), &1);
         let st = tree.chained_search(1, Some(1), "ACGTACGTA-".as_bytes(), &2, &hs);
         assert_eq!(st.0.len(), 3);
         //st.0.iter().for_each(|x| println!("key {}",String::from_utf8(x.0.clone()).unwrap()));
 
-        tree.insert("ACGTACG--".as_bytes(),Some(1),&1);
+        tree.insert("ACGTACG--".as_bytes(), Some(1), &1);
         let st = tree.chained_search(1, Some(1), "ACGTACGTA-".as_bytes(), &1, &hs);
         assert_eq!(st.0.len(), 3);
         //st.0.iter().for_each(|x| println!("key after double gap {}",String::from_utf8(x.0.clone()).unwrap()));
@@ -1080,7 +1083,7 @@ mod tests {
     fn test_error_unambiguous_sequences() {
         let strings = read_file_to_vec("python/Anchored_error_20mer_set.txt").unwrap();
 
-        let hit_set = LinkedDistances::cluster_string_vector_list(strings,&1, &5.0);
+        let hit_set = LinkedDistances::cluster_string_vector_list(strings, &1, &5.0);
 
         // either hits are non error, which should be 120 read counts (100 original reads plus 20 more singletons collapsed into it) or error singletons (1 read)
         for hit in hit_set {
@@ -1089,11 +1092,31 @@ mod tests {
             } else if hit.1.borrow().count == 1 {
                 assert!(!hit.1.borrow().valid);
             } else {
-                panic!("Unknown result; counts {}",hit.1.borrow().count);
+                panic!("Unknown result; counts {}", hit.1.borrow().count);
             }
         }
     }
 
+    #[test]
+    fn test_error_from_clique() {
+        let test_set = vec![
+            ("ACCTGGATTGGA".as_bytes().to_vec(), 10),
+            ("ACGTGGAATGGA".as_bytes().to_vec(), 1),
+            ("ACCTGGAATGGA".as_bytes().to_vec(), 1),
+            ("ACCTGGAATGTA".as_bytes().to_vec(), 1)];
+        let hit_set = LinkedDistances::cluster_string_vector_list(test_set, &2, &5.0);
+
+        // either hits are non error, which should be 120 read counts (100 original reads plus 20 more singletons collapsed into it) or error singletons (1 read)
+        for hit in hit_set {
+            if hit.1.borrow().count > 10 {
+                assert!(hit.1.borrow().valid);
+                assert_eq!(hit.1.borrow().count,13);
+            } else {
+                assert!(!hit.1.borrow().valid);
+                assert_eq!(hit.1.borrow().count,1);
+            }
+        }
+    }
 
     #[test]
     fn test_first_level() {
