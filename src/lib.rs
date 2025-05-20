@@ -843,12 +843,12 @@ impl LinkedDistances {
         ret
     }
 
-    pub fn cluster_string_vector_list(mut strings: Vec<(Vec<u8>, usize)>, max_mismatch: &usize, minimum_ratio: &f64) -> Vec<(Vec<u8>, Link<DistanceGraphNode>)> {
+    pub fn cluster_string_vector_list(max_string_length: &usize, mut strings: Vec<(Vec<u8>, usize)>, max_mismatch: &usize, minimum_ratio: &f64) -> Vec<(Vec<u8>, Link<DistanceGraphNode>)> {
         assert!(*minimum_ratio >= 2.0); // this is a bit arbitrary, but it prevents anyone from doing something really dumb here
         strings.sort();
 
 
-        let mut trie = Trie::new(strings.get(0).unwrap().0.len());
+        let mut trie = Trie::new(*max_string_length);
 
         let mut search_nodes = HashSet::default();
         search_nodes.extend(trie.insert(&strings[0].0, Some(1) /* return the first level of the tree */, &max_mismatch));
@@ -857,6 +857,8 @@ impl LinkedDistances {
         let mut linked_dist = LinkedDistances::new_from_counts(&strings);
 
         (1..strings.len()).for_each(|x| {
+            //println!("{} {} {}",String::from_utf8(strings[x].0.clone()).unwrap(),strings[x].0.len(),*max_string_length);
+            assert!(*max_string_length >= strings[x].0.len());
             let start = if x > 1 { LinkedDistances::prefix_overlap_str(&strings[x].0, &strings[x - 1].0) } else { 0 };
             let mut future = if x < strings.len() - 1 { LinkedDistances::prefix_overlap_str(&strings[x + 1].0, &strings[x].0) } else { 0 };
 
@@ -1081,9 +1083,11 @@ mod tests {
 
     #[test]
     fn test_error_unambiguous_sequences() {
+
+        // acutally length 25 now -- fix the file name at some point
         let strings = read_file_to_vec("python/Anchored_error_20mer_set.txt").unwrap();
 
-        let hit_set = LinkedDistances::cluster_string_vector_list(strings, &1, &5.0);
+        let hit_set = LinkedDistances::cluster_string_vector_list(&25, strings, &1, &5.0);
 
         // either hits are non error, which should be 120 read counts (100 original reads plus 20 more singletons collapsed into it) or error singletons (1 read)
         for hit in hit_set {
@@ -1104,7 +1108,7 @@ mod tests {
             ("ACGTGGAATGGA".as_bytes().to_vec(), 1),
             ("ACCTGGAATGGA".as_bytes().to_vec(), 1),
             ("ACCTGGAATGTA".as_bytes().to_vec(), 1)];
-        let hit_set = LinkedDistances::cluster_string_vector_list(test_set, &2, &5.0);
+        let hit_set = LinkedDistances::cluster_string_vector_list(&12, test_set, &2, &5.0);
 
         // either hits are non error, which should be 120 read counts (100 original reads plus 20 more singletons collapsed into it) or error singletons (1 read)
         for hit in hit_set {
