@@ -489,6 +489,10 @@ impl Trie {
         links
     }
 
+    /// BEWARE: This function relies on in-order searching and other constraints of the
+    /// algorithm. I'm making it public, but be prepared to shoot yourself in the foot.
+    /// Be especially aware of the link between start_depth, future_depth, and the search_node list.
+    ///
     /// Performs an optimized search through the trie for similar sequences.
     ///
     /// This method implements a chained search strategy that leverages prior work and
@@ -504,14 +508,15 @@ impl Trie {
     /// * `future_depth` - If provided, nodes at this depth will be collected for future searches.
     /// * `sequence` - The sequence to search for.
     /// * `max_mismatches` - The maximum allowed edit distance.
-    /// * `search_nodes` - The set of nodes to start the search from.
+    /// * `search_nodes` - The set of nodes to start the search from. This is generated from the previous
+    ///                     sequences' run (in alphabetic order);
     ///
     /// # Returns
     ///
     /// A tuple containing:
     /// - A vector of matching sequences and their edit distances
     /// - A set of nodes that can be used for future searches
-    fn chained_search(&mut self,
+    pub fn chained_search(&mut self,
                       start_depth: usize,
                       future_depth: Option<usize>,
                       sequence: &[u8],
