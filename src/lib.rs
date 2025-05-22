@@ -841,7 +841,7 @@ impl LinkedDistances {
         false
     }
 
-    fn prefix_overlap_str(a: &[u8], b: &[u8]) -> usize {
+    pub fn prefix_overlap_str(a: &[u8], b: &[u8]) -> usize {
         let ret = a.iter().zip(b.iter())
             .take_while(|(ac, bc)| **ac == **bc)
             .count();
