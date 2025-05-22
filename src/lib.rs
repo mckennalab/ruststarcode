@@ -709,7 +709,7 @@ impl LinkedDistances {
     /// # Parameters
     ///
     /// * `strings_and_counts` - Vector of (sequence, count) pairs.
-    fn new_from_counts(strings_and_counts: &Vec<(Vec<u8>, usize)>) -> LinkedDistances {
+    pub fn new_from_counts(strings_and_counts: &Vec<(Vec<u8>, usize)>) -> LinkedDistances {
         let mut nodes: HashMap<Vec<u8>, Link<DistanceGraphNode>> = HashMap::default();
 
         for snc in strings_and_counts {
