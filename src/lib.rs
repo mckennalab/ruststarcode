@@ -433,7 +433,10 @@ impl Trie {
         }
     }
 
-
+    pub fn depth_links(&self, depth: &usize) -> HashSet<Link<TrieNode>> {
+        self.depth_links.get(&1).unwrap().clone().into_iter().collect()
+    }
+    
     /// Inserts a sequence into the trie and returns relevant nodes.
     ///
     /// This method builds the trie structure by inserting each character of the sequence,
@@ -868,7 +871,7 @@ impl LinkedDistances {
             let mut future = if x < strings.len() - 1 { LinkedDistances::prefix_overlap_str(&strings[x + 1].0, &strings[x].0) } else { 0 };
 
             if search_nodes.len() == 0 {
-                search_nodes = trie.depth_links.get(&1).unwrap().clone().into_iter().collect();
+                search_nodes = trie.depth_links(&1);
             }
 
             if start < strings[0].0.len() {
