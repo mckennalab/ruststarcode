@@ -18,21 +18,39 @@ StarCode is an algorithm designed to cluster sequences (particularly barcodes or
 
 ### 1. Trie Construction
 Sequences are inserted into a trie where each node represents a prefix. Each node maintains:
-- Partial dynamic programming matrix for alignment
-- Parent/child relationships
-- Terminal status for complete sequences
+- **Partial dynamic programming matrix**: Contains row and column fragments of the Needleman-Wunsch alignment matrix
+- **Parent/child relationships**: Allows efficient inheritance of alignment data
+- **Terminal status**: Marks nodes representing complete sequences
+- **Visited tracking**: Prevents redundant processing during searches
 
-### 2. Sequence Search
+The trie structure enables sharing of computation for sequences with common prefixes, significantly reducing the overall complexity of edit distance calculations.
+
+### 2. Partial Needleman-Wunsch Algorithm
+The implementation uses a space-optimized version of the Needleman-Wunsch algorithm:
+
+- **Matrix inheritance**: Child nodes inherit partial DP matrices from parents
+- **Row/column computation**: Only the necessary row and column fragments are computed
+- **Best value tracking**: Maintains the minimum edit distance found so far
+- **Early termination**: Stops exploration when edit distance exceeds threshold
+
+This approach reduces space complexity from O(m×n) to O(max_edit_distance) per node while maintaining correctness.
+
+### 3. Sequence Search
 The `chained_search` method efficiently finds sequences within edit distance by:
-- Leveraging shared prefixes to avoid redundant calculations
-- Using partial DP matrices from parent nodes
-- Pruning search space based on edit distance thresholds
+- **Leveraging shared prefixes**: Reuses computation from common sequence prefixes
+- **Using partial DP matrices**: Extends existing alignment data rather than recomputing from scratch
+- **Pruning search space**: Abandons branches when minimum possible edit distance exceeds threshold
+- **Depth-based optimization**: Uses prefix overlap information to start searches at optimal depths
 
-### 3. Clustering via Message Passing
-The clustering algorithm:
-1. Builds a distance graph connecting similar sequences
-2. Uses message passing to collapse low-count sequences into high-count ones
-3. Applies a minimum ratio threshold to prevent over-clustering
+### 4. Clustering via Message Passing
+The clustering algorithm implements a graph-based approach:
+
+1. **Distance graph construction**: Builds a graph where nodes are sequences and edges connect sequences within edit distance
+2. **Message passing iteration**: Repeatedly collapses low-count sequences into high-count neighbors
+3. **Ratio-based filtering**: Only collapses sequences when the count ratio exceeds the minimum threshold
+4. **Validity tracking**: Maintains which sequences remain as cluster representatives
+
+This approach ensures that error sequences (low-count variants) are absorbed into their most likely correct sequences (high-count variants) while preventing over-clustering of legitimate sequence variants.
 
 ## Usage
 
