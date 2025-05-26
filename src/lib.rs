@@ -434,7 +434,7 @@ impl Trie {
     }
 
     pub fn depth_links(&self, depth: &usize) -> HashSet<Link<TrieNode>> {
-        self.depth_links.get(&1).unwrap().clone().into_iter().collect()
+        self.depth_links.get(depth).unwrap().clone().into_iter().collect()
     }
     
     /// Inserts a sequence into the trie and returns relevant nodes.
@@ -454,6 +454,7 @@ impl Trie {
     /// A vector of links to nodes at the requested depth.
     pub fn insert(&mut self, seq: &[u8], depth_to_return: Option<usize>, max_mismatch: &usize) -> Vec<Link<TrieNode>> {
         debug!("Inserting {} with return depth {}",String::from_utf8(seq.to_vec()).unwrap(),depth_to_return.unwrap_or(999));
+        assert!(seq.len() <= self.max_height && seq.len() > 0);
 
         let mut current_node = Link { 0: Rc::clone(&self.root) };
         let mut links = Vec::new();
@@ -853,6 +854,8 @@ impl LinkedDistances {
 
     pub fn cluster_string_vector_list(max_string_length: &usize, mut strings: Vec<(Vec<u8>, usize)>, max_mismatch: &usize, minimum_ratio: &f64) -> Vec<(Vec<u8>, Link<DistanceGraphNode>)> {
         assert!(*minimum_ratio >= 2.0); // this is a bit arbitrary, but it prevents anyone from doing something really dumb here
+        if strings.len() == 0 {return Vec::new()}
+
         strings.sort();
 
 
@@ -1218,5 +1221,234 @@ mod tests {
         trie_node.fill_alignment(&partial_nw, &offset_x, &search_sequence, &max_mismatch);
         assert_eq!(trie_node.partial_dp.column, vec![3, 3, 3, 2]);
         assert_eq!(trie_node.partial_dp.row, vec![3, 4, 3]);
+    }
+
+    // Edge case tests
+    #[test]
+    #[should_panic(expected = "assertion failed")]
+    fn test_empty_sequence_insertion() {
+        let mut trie = Trie::new(10);
+        let empty_seq = b"";
+        
+        // Should handle empty sequence without panic
+        trie.insert(empty_seq, None, &2);
+    }
+
+    #[test]
+    fn test_single_character_sequence() {
+        let mut trie = Trie::new(10);
+        
+        // Insert single character sequences
+        trie.insert(b"A", None, &1);
+        trie.insert(b"C", None, &1);
+        trie.insert(b"G", None, &1);
+        trie.insert(b"T", None, &1);
+        
+        // Verify all four nucleotides are present as children of root
+        assert!(trie.root.borrow().children.contains_key(&b'A'));
+        assert!(trie.root.borrow().children.contains_key(&b'C'));
+        assert!(trie.root.borrow().children.contains_key(&b'G'));
+        assert!(trie.root.borrow().children.contains_key(&b'T'));
+        
+        // Each should be terminal
+        assert!(trie.root.borrow().children[&b'A'].borrow().is_terminal);
+        assert!(trie.root.borrow().children[&b'C'].borrow().is_terminal);
+        assert!(trie.root.borrow().children[&b'G'].borrow().is_terminal);
+        assert!(trie.root.borrow().children[&b'T'].borrow().is_terminal);
+    }
+
+    #[test]
+    fn test_maximum_length_sequence() {
+        let max_length = 5;
+        let mut trie = Trie::new(max_length);
+        
+        // Create sequence at maximum length
+        let max_seq = vec![b'A'; max_length];
+        trie.insert(&max_seq, None, &2);
+        
+        // Verify it was inserted correctly
+        let mut current = trie.root.clone();
+        for i in 0..max_length {
+            assert!(&current.borrow().children.contains_key(&b'A'));
+            let child = current.borrow().children[&b'A'].clone();
+            current = Link { 0: child };
+            assert_eq!(current.borrow().depth, i + 1);
+            assert_eq!(current.borrow().sequence.len(), i + 1);
+        }
+        assert!(current.borrow().is_terminal);
+    }
+
+    #[test]
+    fn test_identical_sequences() {
+        let mut trie = Trie::new(10);
+        let seq = b"ACGT";
+        
+        // Insert same sequence multiple times
+        trie.insert(seq, None, &2);
+        trie.insert(seq, None, &2);
+        trie.insert(seq, None, &2);
+        
+        // Should still have only one path
+        let mut current = trie.root.clone();
+        for &ch in seq {
+            assert_eq!(current.borrow().children.len(), 1);
+
+            let child = current.borrow().children[&ch].clone();
+            current = Link { 0: child };
+        }
+        assert!(current.borrow().is_terminal);
+    }
+
+    #[test]
+    fn test_clustering_empty_input() {
+        let empty_strings: Vec<(Vec<u8>, usize)> = vec![];
+        let result = LinkedDistances::cluster_string_vector_list(&10, empty_strings, &2, &5.0);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_clustering_single_sequence() {
+        let single_seq = vec![(b"ACGT".to_vec(), 100)];
+        let result = LinkedDistances::cluster_string_vector_list(&10, single_seq, &2, &5.0);
+        
+        assert_eq!(result.len(), 1);
+        assert!(result[0].1.borrow().valid);
+        assert_eq!(result[0].1.borrow().count, 100);
+        assert_eq!(result[0].0, b"ACGT".to_vec());
+    }
+
+    #[test]
+    fn test_clustering_zero_mismatch_tolerance() {
+        let sequences = vec![
+            (b"AAAA".to_vec(), 10),
+            (b"AAAT".to_vec(), 1),  // 1 mismatch - should not cluster
+            (b"AAAA".to_vec(), 5),  // exact match - should cluster
+        ];
+        
+        let result = LinkedDistances::cluster_string_vector_list(&4, sequences, &0, &5.0);
+        
+        // With 0 mismatch tolerance, only exact matches should cluster
+        let valid_clusters: Vec<_> = result.iter().filter(|x| x.1.borrow().valid).collect();
+        assert_eq!(valid_clusters.len(), 2); // AAAA cluster and AAAT singleton
+    }
+
+    #[test]
+    fn test_very_high_mismatch_tolerance() {
+        let sequences = vec![
+            (b"AAAA".to_vec(), 10),
+            (b"CCCC".to_vec(), 1),  // 4 mismatches
+            (b"GGGG".to_vec(), 1),  // 4 mismatches
+            (b"TTTT".to_vec(), 1),  // 4 mismatches
+        ];
+        
+        let result = LinkedDistances::cluster_string_vector_list(&4, sequences, &4, &5.0);
+        
+        // With very high mismatch tolerance, everything should cluster into one group
+        let valid_clusters: Vec<_> = result.iter().filter(|x| x.1.borrow().valid).collect();
+        assert_eq!(valid_clusters.len(), 1);
+        assert_eq!(valid_clusters[0].1.borrow().count, 13); // 10 + 1 + 1 + 1
+    }
+
+    #[test]
+    fn test_partial_nw_corner_case() {
+        let corner = PartialNW::corner();
+        assert_eq!(corner.column, vec![0]);
+        assert!(corner.row.is_empty());
+        assert_eq!(corner.best_value, 0);
+    }
+
+    #[test]
+    fn test_partial_nw_from_row_column() {
+        let row = vec![1, 2, 3];
+        let col = vec![0, 1, 2, 3];
+        let best = 1;
+        
+        let partial = PartialNW::from_row_column_best(row.clone(), col.clone(), &best);
+        assert_eq!(partial.row, row);
+        assert_eq!(partial.column, col);
+        assert_eq!(partial.best_value, best);
+    }
+
+    #[test]
+    #[should_panic(expected = "assertion failed: row.len() == col.len() - 1")]
+    fn test_partial_nw_invalid_dimensions() {
+        let row = vec![1, 2, 3];
+        let col = vec![0, 1]; // Too short - should panic
+        let best = 1;
+        
+        let partial = PartialNW::from_row_column_best(row, col, &best);
+        partial.pretty_print(); // This should panic
+    }
+
+    #[test]
+    fn test_prefix_overlap_edge_cases() {
+        // Empty sequences
+        assert_eq!(LinkedDistances::prefix_overlap_str(&[], &[]), 0);
+        
+        // One empty sequence
+        assert_eq!(LinkedDistances::prefix_overlap_str(&[b'A'], &[]), 0);
+        assert_eq!(LinkedDistances::prefix_overlap_str(&[], &[b'A']), 0);
+        
+        // No overlap
+        assert_eq!(LinkedDistances::prefix_overlap_str(&[b'A'], &[b'T']), 0);
+        
+        // Complete overlap (identical sequences)
+        let seq = [b'A', b'C', b'G', b'T'];
+        assert_eq!(LinkedDistances::prefix_overlap_str(&seq, &seq), 4);
+        
+        // Partial overlap
+        assert_eq!(LinkedDistances::prefix_overlap_str(&[b'A', b'C', b'G'], &[b'A', b'C', b'T']), 2);
+    }
+
+    #[test]
+    fn test_trie_search_with_no_matches() {
+        let mut trie = Trie::new(10);
+        
+        // Insert some sequences
+        trie.insert(b"AAAA", None, &1);
+        trie.insert(b"CCCC", None, &1);
+        
+        // Search for something very different with low mismatch tolerance
+        let search_nodes = HashSet::default();
+        let (matches, _) = trie.chained_search(0, None, b"TTTT", &1, &search_nodes);
+        
+        // Should find no matches within edit distance 1
+        assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn test_distance_graph_node_creation() {
+        let seq = b"ACGT".to_vec();
+        let count = 42;
+        
+        let node = DistanceGraphNode::new(&seq, &count);
+        
+        assert_eq!(node.string, seq);
+        assert_eq!(node.count, count);
+        assert!(node.valid);
+        assert!(node.links.is_empty());
+        assert_eq!(node.original_link_count, 0);
+        assert!(node.swallowed_links.is_empty());
+    }
+
+    #[test]
+    fn test_link_wrapper_functionality() {
+        let seq = b"TEST".to_vec();
+        let node = TrieNode::new(seq.clone(), None, &0);
+        let link1 = Link::new(node);
+        let link2 = link1.clone();
+        
+        // Test that both links point to the same data
+        assert_eq!(link1.borrow().sequence, seq);
+        assert_eq!(link2.borrow().sequence, seq);
+        
+        // Test that they're equal (same Rc)
+        assert_eq!(link1, link2);
+        
+        // Test hash consistency
+        use std::collections::HashMap;
+        let mut map = HashMap::new();
+        map.insert(link1.clone(), "value");
+        assert_eq!(map.get(&link2), Some(&"value"));
     }
 }
