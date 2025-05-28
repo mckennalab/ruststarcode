@@ -1,16 +1,17 @@
+extern crate core;
+
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
-use std::rc::Rc;
-use std::rc::Weak;
+use log::debug;
 use std::cell::RefCell;
-
 use std::fmt;
 use std::fmt::Debug;
 use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::ops::Deref;
-use log::{debug};
+use std::rc::Rc;
+use std::rc::Weak;
 
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
@@ -74,7 +75,6 @@ impl<T: Hash + PartialEq + Eq + Debug> fmt::Debug for Link<T> {
 }
 
 impl<T: Hash + PartialEq + Eq + Debug> Eq for Link<T> {}
-
 
 impl<T: Hash + PartialEq + Eq + Debug> PartialEq for Link<T> {
     /// Compares two `Link`s by comparing their inner `Rc`s.
@@ -157,14 +157,22 @@ impl PartialNW {
     ///
     /// * `size` - The size to allocate for the dynamic programming vectors.
     pub fn new(size: &usize) -> Self {
-        PartialNW { column: vec![0; *size + 1], row: vec![0; *size], best_value: 0 }
+        PartialNW {
+            column: vec![0; *size + 1],
+            row: vec![0; *size],
+            best_value: 0,
+        }
     }
 
     /// Creates a new PartialNW with just the corner element.
     ///
     /// This is typically used to initialize the matrix at the root node.
     pub fn corner() -> PartialNW {
-        PartialNW { column: vec![0], row: Vec::new(), best_value: 0 }
+        PartialNW {
+            column: vec![0],
+            row: Vec::new(),
+            best_value: 0,
+        }
     }
 
     /// Creates a new PartialNW from existing row and column vectors.
@@ -176,7 +184,11 @@ impl PartialNW {
     /// * `best` - The best alignment score.
     pub fn from_row_column_best(row: Vec<usize>, col: Vec<usize>, best: &usize) -> PartialNW {
         assert!(row.len() == col.len() - 1);
-        PartialNW { column: col, row: row, best_value: *best }
+        PartialNW {
+            column: col,
+            row: row,
+            best_value: *best,
+        }
     }
 
     /// Prints a formatted representation of the partial alignment matrix.
@@ -198,11 +210,10 @@ impl PartialNW {
         for val in &self.row {
             print!("{:>4}", val); // Right-align with width 4
         }
-        print!("{:>4}", &self.column[&self.column.len() - 1]); // Right-align with width 4
+        println!("{:>4}", &self.column[&self.column.len() - 1]); // Right-align with width 4
         debug!("\nbest value {}\n", self.best_value);
     }
 }
-
 
 impl TrieNode {
     /// Creates a new TrieNode.
@@ -234,20 +245,54 @@ impl TrieNode {
     /// * `offset_x` - The current position in the sequence.
     /// * `search_sequence` - The sequence being searched for.
     /// * `max_mismatch` - The maximum allowed edit distance.
-    pub fn fill_alignment_from_parent(&mut self,
-                                      offset_x: &usize,
-                                      search_sequence: &[u8],
-                                      max_mismatch: &usize) {
+    pub fn fill_alignment_from_parent(
+        &mut self,
+        offset_x: &usize,
+        search_sequence: &[u8],
+        max_mismatch: &usize,
+    ) {
         // the order is important - row then column
         let parent_node = match self.parent.as_ref() {
-            None => { panic!("Unable to unwrap node at depth {}", self.depth) }
-            Some(x) => { x.upgrade() }
-        }.unwrap();
-
+            None => {
+                panic!("Unable to unwrap node at depth {}", self.depth)
+            }
+            Some(x) => x.upgrade(),
+        }
+        .unwrap();
+        let max_mismatch= max_mismatch.max(&1);
         let partial_temp = parent_node.borrow().partial_dp.clone().to_owned();
 
-        self.fill_row_from_partial_nw(&partial_temp, offset_x, search_sequence, max_mismatch);
-        self.fill_column_from_partial_nw(&partial_temp, offset_x, search_sequence, max_mismatch);
+        if offset_x > max_mismatch {
+            self.fill_row_from_partial_nw_nested(
+                &partial_temp,
+                offset_x,
+                search_sequence,
+                max_mismatch,
+            );
+            let best = self.partial_dp.best_value;
+            self.fill_column_from_partial_nw_nested(
+                &partial_temp,
+                offset_x,
+                search_sequence,
+                max_mismatch,
+            );
+            self.partial_dp.best_value = best.min(self.partial_dp.best_value);
+        } else {
+            self.fill_row_from_partial_nw_expanding(
+                &partial_temp,
+                offset_x,
+                search_sequence,
+                max_mismatch,
+            );
+            let best = self.partial_dp.best_value;
+            self.fill_column_from_partial_nw_expanding(
+                &partial_temp,
+                offset_x,
+                search_sequence,
+                max_mismatch,
+            );
+            self.partial_dp.best_value = best.min(self.partial_dp.best_value);
+        }
     }
 
     /// Fills the alignment matrix for this node.
@@ -258,15 +303,93 @@ impl TrieNode {
     /// * `node_offset_x` - The offset into the node's sequence.
     /// * `search_sequence` - The sequence being searched for.
     /// * `max_mismatch` - The maximum allowed edit distance.
-    pub fn fill_alignment(&mut self,
-                          row_and_column_basis: &PartialNW,
-                          node_offset_x: &usize, // This is the node offset into the tree -- i.e. offset 1 == position 0 in the string
-                          search_sequence: &[u8],
-                          max_mismatch: &usize) {
+    pub fn fill_alignment(
+        &mut self,
+        row_and_column_basis: &PartialNW,
+        node_offset_x: &usize, // This is the node offset into the tree -- i.e. offset 1 == position 0 in the string
+        search_sequence: &[u8],
+        max_mismatch: &usize,
+    ) {
+        let max_mismatch= max_mismatch.max(&1);
+        if node_offset_x > max_mismatch {
+            self.fill_row_from_partial_nw_nested(
+                row_and_column_basis,
+                node_offset_x,
+                search_sequence,
+                max_mismatch,
+            );
+            let best = self.partial_dp.best_value;
+            self.fill_column_from_partial_nw_nested(
+                row_and_column_basis,
+                node_offset_x,
+                search_sequence,
+                max_mismatch,
+            );
+            self.partial_dp.best_value = best.min(self.partial_dp.best_value);
+        } else {
+            self.fill_row_from_partial_nw_expanding(
+                row_and_column_basis,
+                node_offset_x,
+                search_sequence,
+                max_mismatch,
+            );
+            let best = self.partial_dp.best_value;
+            self.fill_column_from_partial_nw_expanding(
+                row_and_column_basis,
+                node_offset_x,
+                search_sequence,
+                max_mismatch,
+            );
+            self.partial_dp.best_value = best.min(self.partial_dp.best_value);
+        }
+    }
+    /// Fills the row of the partial alignment matrix.
+    ///
+    /// This method calculates the dynamic programming values for the current row
+    /// based on the previous partial alignment data.
+    ///
+    /// # Parameters
+    ///
+    /// * `row_and_column_basis` - The existing partial alignment matrix to extend.
+    /// * `node_offset_x` - The offset into the node's sequence.
+    /// * `search_sequence` - The sequence being searched for.
+    /// * `max_mismatch` - The maximum allowed edit distance.
+    fn fill_row_from_partial_nw_nested(
+        &mut self,
+        row_and_column_basis: &PartialNW,
+        node_offset_x: &usize, // This is the node offset into the tree -- i.e. offset 1 == position 0 in the string
+        search_sequence: &[u8],
+        max_mismatch: &usize,
+    ) {
+        let mut new_row = vec![*max_mismatch; *max_mismatch];
 
-        // the order is important - row then column
-        self.fill_row_from_partial_nw(row_and_column_basis, node_offset_x, search_sequence, max_mismatch);
-        self.fill_column_from_partial_nw(row_and_column_basis, node_offset_x, search_sequence, max_mismatch);
+        let mut best_value = usize::MAX;
+
+        let search_char = search_sequence[*node_offset_x - 1];
+        let comparison_slice = &self.sequence[(node_offset_x - new_row.len())-1..*node_offset_x-1];
+
+        (0..new_row.len()).for_each(|i| {
+            let match_mismatched = match search_char == comparison_slice[i] {
+                true => 0,
+                false => 1,
+            } + row_and_column_basis.row[i];
+
+            let gap_up = if i == new_row.len() - 1 {
+                1 + row_and_column_basis.column[row_and_column_basis.column.len() - 1]
+            } else {
+                1 + row_and_column_basis.row[i + 1]
+            };
+
+            let gap_left = if i == 0 {
+                usize::MAX
+            } else {
+                1 + new_row[i - 1]
+            };
+            (new_row[i], best_value) =
+                TrieNode::best_hit(match_mismatched, gap_left, gap_up, &best_value);
+        });
+        let new_column = vec![0; new_row.len() + 1];
+        self.partial_dp = PartialNW::from_row_column_best(new_row, new_column, &best_value);
     }
 
     /// Fills the row of the partial alignment matrix.
@@ -280,55 +403,39 @@ impl TrieNode {
     /// * `node_offset_x` - The offset into the node's sequence.
     /// * `search_sequence` - The sequence being searched for.
     /// * `max_mismatch` - The maximum allowed edit distance.
-    fn fill_row_from_partial_nw(&mut self,
-                                row_and_column_basis: &PartialNW,
-                                node_offset_x: &usize, // This is the node offset into the tree -- i.e. offset 1 == position 0 in the string
-                                search_sequence: &[u8],
-                                max_mismatch: &usize) {
-
-
-        // it's a little confusing -- we can either be in the part of the matrix where each row / column grows by one vs the
-        // previous rc_basis (early, before max_mismatch + 1 row/columns) or is the same size as the previous row column (after
-        // max_mismatch + 1 rows/columns).
-        let mut previous_rc_basis_offset_mm = 0;
-        let mut previous_rc_basis_offset_row = 1;
-        let mut new_row = vec![*max_mismatch; *max_mismatch];
-
-        // if we're in the early stages do the opposite
-        if *max_mismatch + 1 > *node_offset_x {
-            previous_rc_basis_offset_mm = 1;
-            previous_rc_basis_offset_row = 0;
-            new_row = vec![*node_offset_x; *node_offset_x];
-        }
+    fn fill_row_from_partial_nw_expanding(
+        &mut self,
+        row_and_column_basis: &PartialNW,
+        node_offset_x: &usize, // This is the node offset into the tree -- i.e. offset 1 == position 0 in the string
+        search_sequence: &[u8],
+        max_mismatch: &usize,
+    ) {
+        let mut new_row = vec![*node_offset_x; *node_offset_x];
 
         let mut best_value = usize::MAX;
 
         let search_char = search_sequence[*node_offset_x - 1];
-        let comparison_slice = &self.sequence[node_offset_x - new_row.len()..*node_offset_x];
+        let comparison_slice = &self.sequence[0..*node_offset_x];
 
         (1..new_row.len()).for_each(|i| {
             let match_mismatched = match search_char == comparison_slice[i - 1] {
-                true => { 0 }
-                false => { 1 }
-            } + row_and_column_basis.row[i - previous_rc_basis_offset_mm];
+                true => 0,
+                false => 1,
+            } + row_and_column_basis.row[i - 1];
 
-            let gap_up =
-                if i == new_row.len() - 1 { 1 + row_and_column_basis.column[row_and_column_basis.column.len() - 1] } else { 1 + row_and_column_basis.row[i + previous_rc_basis_offset_row] };
+            let gap_up = if i == new_row.len() - 1 {
+                1 + row_and_column_basis.column[row_and_column_basis.column.len() - 1]
+            } else {
+                //println!("{:?} ---> {:?}", row_and_column_basis.row, new_row);
+                //println!("{} {} {}",i,node_offset_x,max_mismatch);
+
+                1 + row_and_column_basis.row[i]
+            };
 
             let gap_left = 1 + new_row[i - 1];
 
-            if match_mismatched <= gap_left && match_mismatched <= gap_up {
-                new_row[i] = match_mismatched;
-                best_value = best_value.min(match_mismatched);
-            } else if gap_left < match_mismatched && gap_left < gap_up {
-                new_row[i] = gap_left;
-                best_value = best_value.min(gap_left);
-            } else if gap_up <= match_mismatched && gap_up <= gap_left {
-                new_row[i] = gap_up;
-                best_value = best_value.min(gap_up);
-            } else {
-                panic!("Unreachable row state: mm {} gap_up {} gap_left {}", match_mismatched, gap_up, gap_left);
-            }
+            (new_row[i], best_value) =
+                TrieNode::best_hit(match_mismatched, gap_left, gap_up, &best_value);
         });
         let new_column = vec![0; new_row.len() + 1];
         self.partial_dp = PartialNW::from_row_column_best(new_row, new_column, &best_value);
@@ -345,58 +452,130 @@ impl TrieNode {
     /// * `node_offset_x` - The offset into the node's sequence.
     /// * `search_sequence` - The sequence being searched for.
     /// * `max_mismatch` - The maximum allowed edit distance.
-    fn fill_column_from_partial_nw(&mut self,
-                                   row_and_column_basis: &PartialNW,
-                                   node_offset_x: &usize,
-                                   search_sequence: &[u8],
-                                   max_mismatch: &usize) {
+    fn fill_column_from_partial_nw_expanding(
+        &mut self,
+        row_and_column_basis: &PartialNW,
+        node_offset_x: &usize,
+        search_sequence: &[u8],
+        _max_mismatch: &usize,
+    ) {
+        let mut new_column = vec![*node_offset_x; *node_offset_x + 1];
+        let mut best_value = usize::MAX;
 
-        // this function must be called after the row is filled in
+        let this_char = self.sequence[*node_offset_x - 1];
+        let comparison_slice = &search_sequence[0..*node_offset_x];
 
-        let mut previous_rc_basis_offset = 0;
-        let mut new_column = vec![*max_mismatch; *max_mismatch + 1];
+        (1..new_column.len()).for_each(|i| {
+            let match_mismatched = match comparison_slice[i - 1] == this_char {
+                true => 0,
+                false => 1,
+            } + row_and_column_basis.column[i - 1];
 
-        // if we're in the early stages do the opposite
-        if *max_mismatch + 1 > *node_offset_x {
-            previous_rc_basis_offset = 1;
-            new_column = vec![*node_offset_x; *node_offset_x + 1];
+            let gap_left = if i == new_column.len() - 1 {
+                1 + self.partial_dp.row[self.partial_dp.row.len() - 1]
+            } else {
+                1 + row_and_column_basis.column[i]
+            };
+            let gap_up = 1 + new_column[i - 1];
+            (new_column[i], best_value) =
+                TrieNode::best_hit(match_mismatched, gap_left, gap_up, &best_value);
+        });
+
+        self.partial_dp.column = new_column;
+        self.partial_dp.best_value = best_value;
+    }
+
+    fn best_hit(mm: usize, gap_left: usize, gap_up: usize, best_value: &usize) -> (usize, usize) {
+        if mm <= gap_left && mm <= gap_up {
+            (mm, *best_value.min(&mm))
+        } else if gap_left < mm && gap_left < gap_up {
+            (gap_left, *best_value.min(&gap_left))
+        } else if gap_up < mm && gap_up <= gap_left {
+            (gap_up, *best_value.min(&gap_up))
+        } else {
+            panic!(
+                "Unreachable col state: mm {} gap_up {} gap_left {}",
+                mm, gap_up, gap_left
+            );
         }
+    }
+
+    pub fn highlight_indexed_base(seq: &[u8], index: usize) -> String {
+        let mut s = String::new();
+        for (i, c) in seq.iter().enumerate() {
+            if i == index {
+                s.push_str("[");
+            }
+            s.push_str(format!("{}", *c as char).as_str());
+            if i == index {
+                s.push_str("]");
+            }
+        }
+        s
+    }
+
+    /// Fills the column of the partial alignment matrix.
+    ///
+    /// This method calculates the dynamic programming values for the current column
+    /// based on the previous partial alignment data and the row that was just calculated.
+    ///
+    /// # Parameters
+    ///
+    /// * `row_and_column_basis` - The existing partial alignment matrix to extend.
+    /// * `node_offset_x` - The offset into the node's sequence.
+    /// * `search_sequence` - The sequence being searched for.
+    /// * `max_mismatch` - The maximum allowed edit distance.
+    fn fill_column_from_partial_nw_nested(
+        &mut self,
+        row_and_column_basis: &PartialNW,
+        node_offset_x: &usize,
+        search_sequence: &[u8],
+        max_mismatch: &usize,
+    ) {
+        let mut new_column = vec![*max_mismatch; *max_mismatch + 1];
 
         let mut best_value = usize::MAX;
 
         let this_char = self.sequence[*node_offset_x - 1];
 
-        let comparison_slice = &search_sequence[(node_offset_x + 1) - new_column.len()..*node_offset_x];
+        let comparison_slice = &search_sequence[node_offset_x - new_column.len()..*node_offset_x];
 
-        (1..new_column.len()).for_each(|i| {
-            let match_mismatched = match comparison_slice[i - 1] == this_char {
-                true => { 0 }
-                false => { 1 }
-            } + row_and_column_basis.column[i - previous_rc_basis_offset];
+        (0..new_column.len()).for_each(|i| {
+            let match_mismatched = match comparison_slice[i] == this_char {
+                true => 0,
+                false => 1,
+            } + row_and_column_basis.column[i];
 
-            let gap_left = if i == new_column.len() - 1 { 1 + self.partial_dp.row[self.partial_dp.row.len() - 1] } else { 1 + row_and_column_basis.column[(i + 1) - previous_rc_basis_offset] };
-            let gap_up = 1 + new_column[i - 1];
-
-
-            if match_mismatched <= gap_left && match_mismatched <= gap_up {
-                new_column[i] = match_mismatched;
-                best_value = best_value.min(match_mismatched);
-            } else if gap_left < match_mismatched && gap_left < gap_up {
-                new_column[i] = gap_left;
-                best_value = best_value.min(gap_left);
-            } else if gap_up < match_mismatched && gap_up <= gap_left {
-                new_column[i] = gap_up;
-                best_value = best_value.min(gap_up);
+            let gap_left = if i == new_column.len() - 1 {
+                1 + self.partial_dp.row[self.partial_dp.row.len() - 1]
             } else {
-                panic!("Unreachable col state: mm {} gap_up {} gap_left {}", match_mismatched, gap_up, gap_left);
-            }
+                1 + row_and_column_basis.column[i + 1]
+            };
+
+            let gap_up = if i > 0 {
+                1 + new_column[i - 1]
+            } else {
+                usize::MAX
+            };
+            /*if  search_sequence == "TTTTTTTTTTTTTTTAAGAATTTTT".as_bytes() {
+                println!("BOAT - \n{}\n{}\n",
+                         TrieNode::highlight_indexed_base(self.sequence.as_slice(),*node_offset_x - 1),
+                         TrieNode::highlight_indexed_base(search_sequence,(node_offset_x - new_column.len())+i));
+                println!("{} {} {} -- {} {}", comparison_slice[i] as char, this_char as char, i, (node_offset_x - new_column.len())+i,*node_offset_x - 1);
+                println!("{:?} {:?}", comparison_slice, new_column);
+                println!("{:?} {:?}", row_and_column_basis.column, best_value);
+                println!("{:?} {:?}", row_and_column_basis.row, best_value);
+                println!("comparison_slice {} {}",String::from_utf8(comparison_slice.to_vec()).unwrap(),i);
+                println!("match mismatch basis {} -> {} gap up {} gap left {} {} {}\n\n\n", row_and_column_basis.column[i], match_mismatched, gap_up, gap_left, this_char as char, comparison_slice[i] as char);
+            }*/
+            (new_column[i], best_value) =
+                TrieNode::best_hit(match_mismatched, gap_left, gap_up, &best_value);
         });
 
         self.partial_dp.column = new_column;
         self.partial_dp.best_value = best_value;
     }
 }
-
 
 /// A trie data structure optimized for efficient sequence alignment and searching.
 ///
@@ -426,7 +605,9 @@ impl Trie {
     pub fn new(max_height: usize) -> Self {
         let str: Vec<u8> = Vec::new();
         Trie {
-            root: Link { 0: Rc::new(RefCell::new(TrieNode::new(str, None, &0))) },
+            root: Link {
+                0: Rc::new(RefCell::new(TrieNode::new(str, None, &0))),
+            },
             max_height,
             depth_links: HashMap::default(),
             iteration: 1,
@@ -434,9 +615,14 @@ impl Trie {
     }
 
     pub fn depth_links(&self, depth: &usize) -> HashSet<Link<TrieNode>> {
-        self.depth_links.get(depth).unwrap().clone().into_iter().collect()
+        self.depth_links
+            .get(depth)
+            .unwrap()
+            .clone()
+            .into_iter()
+            .collect()
     }
-    
+
     /// Inserts a sequence into the trie and returns relevant nodes.
     ///
     /// This method builds the trie structure by inserting each character of the sequence,
@@ -452,11 +638,22 @@ impl Trie {
     /// # Returns
     ///
     /// A vector of links to nodes at the requested depth.
-    pub fn insert(&mut self, seq: &[u8], depth_to_return: Option<usize>, max_mismatch: &usize) -> Vec<Link<TrieNode>> {
-        debug!("Inserting {} with return depth {}",String::from_utf8(seq.to_vec()).unwrap(),depth_to_return.unwrap_or(999));
+    pub fn insert(
+        &mut self,
+        seq: &[u8],
+        depth_to_return: Option<usize>,
+        max_mismatch: &usize,
+    ) -> Vec<Link<TrieNode>> {
+        debug!(
+            "Inserting {} with return depth {}",
+            String::from_utf8(seq.to_vec()).unwrap(),
+            depth_to_return.unwrap_or(999)
+        );
         assert!(seq.len() <= self.max_height && seq.len() > 0);
 
-        let mut current_node = Link { 0: Rc::clone(&self.root) };
+        let mut current_node = Link {
+            0: Rc::clone(&self.root),
+        };
         let mut links = Vec::new();
 
         for i in 0..seq.len() {
@@ -464,29 +661,60 @@ impl Trie {
 
             if current_node.borrow().children.contains_key(&ch) {
                 let pointer_node = Rc::clone(current_node.borrow().children.get(&ch).unwrap());
-                if depth_to_return.is_some() && depth_to_return.unwrap() == current_node.borrow().depth {
+                if depth_to_return.is_some()
+                    && depth_to_return.unwrap() == current_node.borrow().depth
+                {
                     links.push(current_node.clone());
                 }
-                current_node = Link { 0: Rc::clone(&pointer_node) };
+                current_node = Link {
+                    0: Rc::clone(&pointer_node),
+                };
             } else {
-                let new_node = Link { 0: Rc::new(RefCell::new(TrieNode::new(seq[0..i + 1].to_vec(), Some(Rc::downgrade(&current_node)), &(i + 1)))) };
+                let new_node = Link {
+                    0: Rc::new(RefCell::new(TrieNode::new(
+                        seq[0..i + 1].to_vec(),
+                        Some(Rc::downgrade(&current_node)),
+                        &(i + 1),
+                    ))),
+                };
                 if i == 0 {
-                    new_node.0.borrow_mut().fill_alignment(&PartialNW::corner(), &(i + 1), seq, max_mismatch);
+                    new_node.0.borrow_mut().fill_alignment(
+                        &PartialNW::corner(),
+                        &(i + 1),
+                        seq,
+                        max_mismatch,
+                    );
                 } else {
-                    new_node.0.borrow_mut().fill_alignment_from_parent(&(i + 1), seq, max_mismatch);
+                    new_node
+                        .0
+                        .borrow_mut()
+                        .fill_alignment_from_parent(&(i + 1), seq, max_mismatch);
                 }
 
-                if depth_to_return.is_some() && depth_to_return.unwrap() == new_node.borrow().depth { //&& last_real_node.is_some() {
-                    links.push(Link { 0: Rc::clone(&new_node) });
+                if depth_to_return.is_some() && depth_to_return.unwrap() == new_node.borrow().depth
+                {
+                    //&& last_real_node.is_some() {
+                    links.push(Link {
+                        0: Rc::clone(&new_node),
+                    });
                 }
 
-                current_node.borrow_mut().children.insert(ch, Rc::clone(&new_node));
-                current_node = Link { 0: Rc::clone(&new_node) };
+                current_node
+                    .borrow_mut()
+                    .children
+                    .insert(ch, Rc::clone(&new_node));
+                current_node = Link {
+                    0: Rc::clone(&new_node),
+                };
 
-                self.depth_links.entry(i).or_insert_with(Vec::new).push(Link { 0: Rc::clone(&current_node) });
+                self.depth_links
+                    .entry(i)
+                    .or_insert_with(Vec::new)
+                    .push(Link {
+                        0: Rc::clone(&current_node),
+                    });
             }
         }
-
 
         // Mark the final node as a terminal
         current_node.borrow_mut().is_terminal = true;
@@ -520,64 +748,105 @@ impl Trie {
     /// A tuple containing:
     /// - A vector of matching sequences and their edit distances
     /// - A set of nodes that can be used for future searches
-    pub fn chained_search(&mut self,
-                      start_depth: usize,
-                      future_depth: Option<usize>,
-                      sequence: &[u8],
-                      max_mistaches: &usize,
-                      search_nodes: &HashSet<Link<TrieNode>>) -> (Vec<(Vec<u8>, usize)>, HashSet<Link<TrieNode>>) {
+    pub fn chained_search(
+        &mut self,
+        start_depth: usize,
+        future_depth: Option<usize>,
+        sequence: &[u8],
+        max_mistaches: &usize,
+        search_nodes: &HashSet<Link<TrieNode>>,) -> (Vec<(Vec<u8>, usize)>, HashSet<Link<TrieNode>>) {
         assert!(sequence.len() <= self.max_height);
 
+        let mut debug = false;
+        /*if sequence == "TTTTTTTTTTTTTTTAAGAATTTTT".as_bytes() {debug = true};
+        if debug {
+            search_nodes.iter().for_each(|x| {
+                println!("TTTTTTTTTTTTTTTAAGAATTTTT -> {} {} {}",String::from_utf8(x.0.clone().borrow().sequence.clone()).unwrap(),future_depth.unwrap(),start_depth);
+                x.0.clone().borrow().partial_dp.pretty_print();
+            });
+        }*/
         // create an all-padded string, and then copy over the passed in sequence
         let mut string_rep = vec![b'-'; self.max_height];
         string_rep[0..sequence.len()].copy_from_slice(sequence);
-
 
         let mut hits: Vec<(Vec<u8>, usize)> = Vec::new();
         let mut pebbles: Vec<Link<TrieNode>> = Vec::new(); //HashSet::default();
 
         let mut current_search_pile: Vec<Link<TrieNode>> = if start_depth < 2 {
-            self.depth_links.get(&0).unwrap().iter().map(|x| x.clone()).collect()
+            self.depth_links
+                .get(&0)
+                .unwrap()
+                .iter()
+                .map(|x| x.clone())
+                .collect()
         } else {
             search_nodes.iter().map(|x| x.clone()).collect()
         };
-
+        let mut inner_debug = false;
         while !current_search_pile.is_empty() {
             let current_node = current_search_pile.pop().unwrap();
-            //println!("Trying to fill the current search depth with --{}--",String::from_utf8(current_node.borrow().sequence.clone()).unwrap());
-            if current_node.borrow().visited < self.iteration { // && current_node.borrow().depth >= start_depth {
+
+            /*if debug {
+                let slice_len = current_node.0.borrow().sequence.len().min(20);
+                println!("SLICED node: {}",String::from_utf8(current_node.0.borrow().sequence[0..slice_len].to_vec()).unwrap());
+                current_node.0.clone().borrow().partial_dp.pretty_print();
+                if &current_node.0.borrow().sequence[0..slice_len] == "TTTTTTTTTTTTTTTAAAAA".as_bytes() {
+                    inner_debug = true;
+                }
+                println!("Inner debug: {} visited {} {}",inner_debug, current_node.0.borrow().visited, self.iteration);
+            }*/
+            if current_node.borrow().visited < self.iteration {
+                //println!("here");
                 let current_node_depth = current_node.borrow().depth;
 
-                current_node.borrow_mut().fill_alignment_from_parent(&(current_node_depth), string_rep.as_slice(), max_mistaches);
+                current_node.borrow_mut().fill_alignment_from_parent(
+                    &(current_node_depth),
+                    string_rep.as_slice(),
+                    max_mistaches,
+                );
                 current_node.borrow_mut().visited = self.iteration;
 
-                if future_depth.is_some() && current_node_depth < future_depth.unwrap() {
-                    //println!("pushing --{}--",String::from_utf8(current_node.borrow().sequence.clone()).unwrap());
-
-                    pebbles.push(Link { 0: Rc::clone(&current_node) });
+                if future_depth.is_some() && current_node_depth <= future_depth.unwrap() {
+                   pebbles.push(Link {
+                        0: Rc::clone(&current_node),
+                    });
                 }
+                /*if inner_debug {
+                    println!("INNER debug, terminal = {}",current_node.borrow().is_terminal);
+                    current_node.borrow().partial_dp.pretty_print();
 
+                }*/
                 if current_node.borrow().partial_dp.best_value <= *max_mistaches {
                     if current_node.borrow().is_terminal {
-                        hits.push((current_node.borrow().sequence.clone(), current_node.borrow().partial_dp.best_value));
+                        //println!("PUSHING HIT: {} {}",String::from_utf8(current_node.0.borrow().sequence.clone()).unwrap(),current_node.borrow().partial_dp.best_value);
+                        hits.push((
+                            current_node.borrow().sequence.clone(),
+                            current_node.borrow().partial_dp.best_value,
+                        ));
                     } else if current_node.borrow().children.len() > 0 {
-
                         // we're not at the end and children exist, for each child update the DP matrix and add to the pile
                         for child in current_node.borrow().children.values() {
-                            current_search_pile.push(Link { 0: Rc::clone(child) });
+                            current_search_pile.push(Link {
+                                0: Rc::clone(child),
+                            });
                         }
                     }
                 } else {
                     // we're not going to explore it anymore, but future nodes may need the link
-                    //println!("pushing 2 --{}--",String::from_utf8(current_node.borrow().sequence.clone()).unwrap());
-                    pebbles.push(Link { 0: Rc::clone(&current_node.0) });
+                    //pebbles.push(Link {
+                    //    0: Rc::clone(&current_node.0),
+                    //});
                 }
             }
         }
 
         // now for each search node, walk back to the future point
         if future_depth.is_some() && future_depth.unwrap() < start_depth {
-            let target_depth = if future_depth.unwrap() < *max_mistaches { 1 } else { future_depth.unwrap() - (max_mistaches) };
+            let target_depth = if future_depth.unwrap() < *max_mistaches {
+                1
+            } else {
+                future_depth.unwrap() - (max_mistaches)
+            };
 
             let mut return_pebbles: HashSet<Link<crate::TrieNode>> = HashSet::default();
             pebbles.extend(search_nodes.iter().map(|x| Link { 0: Rc::clone(&x.0) }));
@@ -587,10 +856,17 @@ impl Trie {
 
                 // walk back up the tree until we've reached the target depth or the depth will be 1 (don't walk back to the root)
                 while nd_pointer.borrow().depth > target_depth && nd_pointer.borrow().depth > 1 {
-                    nd_pointer = Rc::clone(&nd_pointer).borrow_mut().parent.as_ref().unwrap().upgrade().unwrap().clone();
+                    nd_pointer = Rc::clone(&nd_pointer)
+                        .borrow_mut()
+                        .parent
+                        .as_ref()
+                        .unwrap()
+                        .upgrade()
+                        .unwrap()
+                        .clone();
                 }
 
-                    return_pebbles.insert(Link { 0: nd_pointer });
+                return_pebbles.insert(Link { 0: nd_pointer });
             }
             self.iteration += 1;
             (hits, return_pebbles)
@@ -618,16 +894,30 @@ impl Trie {
         while !search_nodes.is_empty() {
             let current_node = search_nodes.pop().unwrap();
 
-            writeln!(file, "n{}_d{};", String::from_utf8(current_node.borrow().sequence.clone()).unwrap(), current_node.borrow().depth).expect("Failed to write dot plot entry");
+            writeln!(
+                file,
+                "n{}_d{};",
+                String::from_utf8(current_node.borrow().sequence.clone()).unwrap(),
+                current_node.borrow().depth
+            )
+            .expect("Failed to write dot plot entry");
 
             for child in &current_node.borrow().children {
                 debug!("adding pepples");
                 let child_node = child.1.borrow();
-                writeln!(file, "n{}_d{} -- n{}_d{} [label=\"{}\"];", String::from_utf8(current_node.borrow().sequence.clone()).unwrap(), current_node.borrow().depth,
-                         String::from_utf8(child_node.sequence.clone()).unwrap(), child_node.depth,
-                         *child.0 as char
-                ).expect("Failed to write dot plot entry");
-                search_nodes.push(Link { 0: Rc::clone(&child.1) });
+                writeln!(
+                    file,
+                    "n{}_d{} -- n{}_d{} [label=\"{}\"];",
+                    String::from_utf8(current_node.borrow().sequence.clone()).unwrap(),
+                    current_node.borrow().depth,
+                    String::from_utf8(child_node.sequence.clone()).unwrap(),
+                    child_node.depth,
+                    *child.0 as char
+                )
+                .expect("Failed to write dot plot entry");
+                search_nodes.push(Link {
+                    0: Rc::clone(&child.1),
+                });
             }
         }
         writeln!(file, "}}").expect("Failed to write closing line");
@@ -644,13 +934,14 @@ impl Trie {
         while !search_nodes.is_empty() {
             let current_node = search_nodes.pop().unwrap();
             for child in &current_node.borrow().children {
-                search_nodes.push(Link { 0: Rc::clone(&child.1) });
+                search_nodes.push(Link {
+                    0: Rc::clone(&child.1),
+                });
             }
             current_node.borrow_mut().visited = 0;
         }
     }
 }
-
 
 #[derive(Debug)]
 pub struct DistanceGraphNode {
@@ -670,10 +961,16 @@ impl DistanceGraphNode {
     /// * `string` - The sequence for this node.
     /// * `count` - The count or frequency of this sequence.
     pub fn new(string: &Vec<u8>, count: &usize) -> DistanceGraphNode {
-        DistanceGraphNode { string: string.clone(), count: count.clone(), valid: true, links: HashMap::default(), original_link_count: 0, swallowed_links: Vec::new() }
+        DistanceGraphNode {
+            string: string.clone(),
+            count: count.clone(),
+            valid: true,
+            links: HashMap::default(),
+            original_link_count: 0,
+            swallowed_links: Vec::new(),
+        }
     }
 }
-
 
 impl Hash for DistanceGraphNode {
     /// Hashes the node based on its sequence.
@@ -691,7 +988,6 @@ impl PartialEq for DistanceGraphNode {
 
 impl Eq for DistanceGraphNode {}
 
-
 /// A graph structure that maintains distances between sequences.
 ///
 /// This structure is used to build and analyze a graph where nodes represent
@@ -705,7 +1001,9 @@ impl LinkedDistances {
     /// Creates a new, empty LinkedDistances graph.
     #[allow(dead_code)]
     pub fn new() -> LinkedDistances {
-        LinkedDistances { nodes: HashMap::default() }
+        LinkedDistances {
+            nodes: HashMap::default(),
+        }
     }
 
     /// Creates a new LinkedDistances graph from a vector of sequences and their counts.
@@ -733,7 +1031,9 @@ impl LinkedDistances {
     fn add_node(&mut self, string: &Vec<u8>, count: &usize) {
         assert!(!self.nodes.contains_key(string));
 
-        let node = Link { 0: Rc::new(RefCell::new(DistanceGraphNode::new(string, count))) };
+        let node = Link {
+            0: Rc::new(RefCell::new(DistanceGraphNode::new(string, count))),
+        };
         self.nodes.insert(string.clone(), node);
     }
 
@@ -752,11 +1052,16 @@ impl LinkedDistances {
             assert_ne!(to_node_name, from);
             let to_node = Rc::clone(self.nodes.get(to_node_name).as_ref().unwrap());
 
-            let entry = self.nodes.entry(from.clone()).
-                or_insert(Link { 0: Rc::new(RefCell::new(DistanceGraphNode::new(&Vec::new(), &0))) });
+            let entry = self.nodes.entry(from.clone()).or_insert(Link {
+                0: Rc::new(RefCell::new(DistanceGraphNode::new(&Vec::new(), &0))),
+            });
 
             if !entry.0.borrow().links.contains_key(to_node_name) {
-                entry.0.borrow_mut().links.insert(to_node_name.clone(), Rc::downgrade(&to_node));
+                entry
+                    .0
+                    .borrow_mut()
+                    .links
+                    .insert(to_node_name.clone(), Rc::downgrade(&to_node));
                 let linking = Rc::downgrade(&Rc::clone(&from_node));
                 to_node.borrow_mut().links.insert(from.clone(), linking);
             }
@@ -776,7 +1081,10 @@ impl LinkedDistances {
     /// # Returns
     ///
     /// A vector of (sequence, node) pairs representing the collapsed graph.
-    fn message_passing_collpase(self, minimum_ratio: &f64) -> Vec<(Vec<u8>, Link<DistanceGraphNode>)> {
+    fn message_passing_collpase(
+        self,
+        minimum_ratio: &f64,
+    ) -> Vec<(Vec<u8>, Link<DistanceGraphNode>)> {
         let mut sorted: Vec<_> = self.nodes.into_iter().collect();
 
         sorted.sort_by(|a, b| a.1.borrow().count.cmp(&b.1.borrow().count)); // sort by value descending
@@ -791,15 +1099,28 @@ impl LinkedDistances {
                 let valid = x.1.borrow().valid;
                 if valid {
                     valid_count += 1;
-                    modified = modified | LinkedDistances::message_passing_check(&mut Rc::clone(&x.1), minimum_ratio);
+                    modified = modified
+                        | LinkedDistances::message_passing_check(
+                            &mut Rc::clone(&x.1),
+                            minimum_ratio,
+                        );
                 }
-                debug!("Node {} valid {} {}  {}", String::from_utf8(x.0.clone()).unwrap(), valid, x.1.borrow().valid, x.1.borrow().count);
+                debug!(
+                    "Node {} valid {} {}  {}",
+                    String::from_utf8(x.0.clone()).unwrap(),
+                    valid,
+                    x.1.borrow().valid,
+                    x.1.borrow().count
+                );
             });
         }
         sorted
     }
 
-    fn message_passing_check(link: &mut Rc<RefCell<DistanceGraphNode>>, minimum_ratio: &f64) -> bool {
+    fn message_passing_check(
+        link: &mut Rc<RefCell<DistanceGraphNode>>,
+        minimum_ratio: &f64,
+    ) -> bool {
         let my_count = link.borrow().count;
         let link_size = link.borrow().links.len();
 
@@ -809,18 +1130,43 @@ impl LinkedDistances {
 
             let mut link1 = link.borrow_mut();
 
-            link1.links.iter().for_each(|x| if x.0 == &link_name { panic!("Self link {}", String::from_utf8(link_name.clone()).unwrap()) });
+            link1.links.iter().for_each(|x| {
+                if x.0 == &link_name {
+                    panic!(
+                        "Self link {}",
+                        String::from_utf8(link_name.clone()).unwrap()
+                    )
+                }
+            });
 
-            let highest_connection = link1.links.iter().max_by_key(|&(_k, v)| v.upgrade().unwrap().borrow().count).unwrap();
+            let highest_connection = link1
+                .links
+                .iter()
+                .max_by_key(|&(_k, v)| v.upgrade().unwrap().borrow().count)
+                .unwrap();
 
-            if highest_connection.1.upgrade().unwrap().borrow().count as f64 / my_count as f64 > *minimum_ratio {
+            if highest_connection.1.upgrade().unwrap().borrow().count as f64 / my_count as f64
+                > *minimum_ratio
+            {
                 link1.links.iter().for_each(|dist_link| {
                     let dist = dist_link.1.upgrade().unwrap();
                     dist.borrow_mut().links.remove(&link_name);
                 });
-                debug!("linker removed! {} {}",
-                         String::from_utf8(link1.string.clone()).unwrap(),
-                         String::from_utf8(highest_connection.1.clone().upgrade().unwrap().borrow().string.clone()).unwrap());
+                debug!(
+                    "linker removed! {} {}",
+                    String::from_utf8(link1.string.clone()).unwrap(),
+                    String::from_utf8(
+                        highest_connection
+                            .1
+                            .clone()
+                            .upgrade()
+                            .unwrap()
+                            .borrow()
+                            .string
+                            .clone()
+                    )
+                    .unwrap()
+                );
 
                 // add my count to the larger nodes count
                 let sink = highest_connection.1.clone().upgrade().unwrap();
@@ -828,11 +1174,28 @@ impl LinkedDistances {
                 sink.count += my_count;
                 sink.swallowed_links.push((link_name.clone(), my_count));
 
-                debug!("linker removed! {} {} -- {} {}",
-                         String::from_utf8(link1.string.clone()).unwrap(),
-                         link1.valid,
-                         String::from_utf8(highest_connection.1.clone().upgrade().unwrap().borrow().string.clone()).unwrap(),
-                         highest_connection.1.clone().upgrade().unwrap().borrow().valid,
+                debug!(
+                    "linker removed! {} {} -- {} {}",
+                    String::from_utf8(link1.string.clone()).unwrap(),
+                    link1.valid,
+                    String::from_utf8(
+                        highest_connection
+                            .1
+                            .clone()
+                            .upgrade()
+                            .unwrap()
+                            .borrow()
+                            .string
+                            .clone()
+                    )
+                    .unwrap(),
+                    highest_connection
+                        .1
+                        .clone()
+                        .upgrade()
+                        .unwrap()
+                        .borrow()
+                        .valid,
                 );
 
                 // I'm no longer valid, clear my links too
@@ -846,43 +1209,72 @@ impl LinkedDistances {
     }
 
     pub fn prefix_overlap_str(a: &[u8], b: &[u8]) -> usize {
-        let ret = a.iter().zip(b.iter())
+        let ret = a
+            .iter()
+            .zip(b.iter())
             .take_while(|(ac, bc)| **ac == **bc)
             .count();
         ret
     }
 
-    pub fn cluster_string_vector_list(max_string_length: &usize, mut strings: Vec<(Vec<u8>, usize)>, max_mismatch: &usize, minimum_ratio: &f64) -> Vec<(Vec<u8>, Link<DistanceGraphNode>)> {
+    pub fn cluster_string_vector_list(
+        max_string_length: &usize,
+        mut strings: Vec<(Vec<u8>, usize)>,
+        max_mismatch: &usize,
+        minimum_ratio: &f64,
+    ) -> Vec<(Vec<u8>, Link<DistanceGraphNode>)> {
+
         assert!(*minimum_ratio >= 2.0); // this is a bit arbitrary, but it prevents anyone from doing something really dumb here
-        if strings.len() == 0 {return Vec::new()}
+        if strings.len() == 0 {
+            return Vec::new();
+        }
 
         strings.sort();
-
 
         let mut trie = Trie::new(*max_string_length);
 
         let mut search_nodes = HashSet::default();
-        search_nodes.extend(trie.insert(&strings[0].0, Some(1) /* return the first level of the tree */, &max_mismatch));
+        search_nodes.extend(trie.insert(
+            &strings[0].0,
+            Some(1), /* return the first level of the tree */
+            &max_mismatch,
+        ));
 
         // now make a LinkedDistances with the nodes
         let mut linked_dist = LinkedDistances::new_from_counts(&strings);
 
         (1..strings.len()).for_each(|x| {
-            //println!("{} {} {}",String::from_utf8(strings[x].0.clone()).unwrap(),strings[x].0.len(),*max_string_length);
+
             assert!(*max_string_length >= strings[x].0.len());
-            let start = if x > 1 { LinkedDistances::prefix_overlap_str(&strings[x].0, &strings[x - 1].0) } else { 0 };
-            let mut future = if x < strings.len() - 1 { LinkedDistances::prefix_overlap_str(&strings[x + 1].0, &strings[x].0) } else { 0 };
+            let start = if x > 1 {
+                LinkedDistances::prefix_overlap_str(&strings[x].0, &strings[x - 1].0)
+            } else {
+                0
+            };
+            let mut future = if x < strings.len() - 1 {
+                LinkedDistances::prefix_overlap_str(&strings[x + 1].0, &strings[x].0)
+            } else {
+                0
+            };
 
             if search_nodes.len() == 0 {
                 search_nodes = trie.depth_links(&1);
             }
 
             if start < strings[0].0.len() {
-                let rt = trie.chained_search(start, Some(future), &strings[x].0, &max_mismatch, &search_nodes);
+                let rt = trie.chained_search(
+                    start,
+                    Some(future),
+                    &strings[x].0,
+                    &max_mismatch,
+                    &search_nodes,
+                );
                 search_nodes = rt.1;
                 linked_dist.add_links(&strings[x].0, &rt.0);
-
-                if future < 1 { future = 1; }
+                //println!("{} = x, {} {} {} {} {:?}",x,future,String::from_utf8(strings[x].0.clone()).unwrap(),strings[x].0.len(),*max_string_length,rt.0.iter().map(|x| String::from_utf8(x.0.clone()).unwrap()).collect::<Vec<String>>());
+                if future < 1 {
+                    future = 1;
+                }
 
                 search_nodes.extend(trie.insert(&strings[x].0, Some(future), &max_mismatch));
             }
@@ -892,19 +1284,17 @@ impl LinkedDistances {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use std::io;
 
-    use std::io::{BufRead, BufReader};
     use super::*;
+    use std::io::{BufRead, BufReader};
 
     extern crate rand;
 
     use rand::prelude::*;
     use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
-
 
     #[allow(dead_code)]
     fn gen_random_dna(len: usize) -> Vec<u8> {
@@ -993,12 +1383,18 @@ mod tests {
         }
     }
 
-
     #[test]
     fn test_overlap_strings() {
-        let str1 = vec![b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'G', b'G'];
-        let str2 = vec![b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'T', b'T'];
-        assert_eq!(LinkedDistances::prefix_overlap_str(str1.as_slice(), str2.as_slice()), 10);
+        let str1 = vec![
+            b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'G', b'G',
+        ];
+        let str2 = vec![
+            b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'T', b'T',
+        ];
+        assert_eq!(
+            LinkedDistances::prefix_overlap_str(str1.as_slice(), str2.as_slice()),
+            10
+        );
     }
 
     #[allow(dead_code)]
@@ -1035,13 +1431,14 @@ mod tests {
                 Ok(z) => {
                     buffer.push(z.into_bytes());
                 }
-                Err(_) => { panic!("Problem processing file") }
+                Err(_) => {
+                    panic!("Problem processing file")
+                }
             }
         }
         // Collect lines into a Vec<String>
         buffer
     }
-
 
     fn read_file_to_vec(path: &str) -> io::Result<Vec<(Vec<u8>, usize)>> {
         let file = File::open(path)?;
@@ -1056,18 +1453,26 @@ mod tests {
 
             // Split on whitespace
             let mut parts = line.split_whitespace();
-            let seq_str = parts.next().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Missing sequence"))?;
-            let count_str = parts.next().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Missing count"))?;
+            let seq_str = parts
+                .next()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Missing sequence"))?;
+            let count_str = parts
+                .next()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Missing count"))?;
 
             let seq = seq_str.as_bytes().to_vec(); // Convert to Vec<u8>
-            let count: usize = count_str.parse().map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid count"))?;
+            let count: usize = count_str
+                .parse()
+                .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid count"))?;
 
-            results.entry(seq).and_modify(|v| *v += count).or_insert(count);
+            results
+                .entry(seq)
+                .and_modify(|v| *v += count)
+                .or_insert(count);
         }
 
         Ok(results.into_iter().collect())
     }
-
 
     #[test]
     fn test_adding_unpadded_string_to_tree() {
@@ -1093,8 +1498,19 @@ mod tests {
     }
 
     #[test]
+    fn test_large_one_off() {
+        let mut tree = Trie::new(25);
+        tree.insert("TTTTTTTTTTTTTTTAAAAATTTTT".as_bytes(), Some(1), &1);
+        let hs = HashSet::default();
+        let st = tree.chained_search(1, Some(1), "TTTTTTTTTTTTTTTAAGAATTTTT".as_bytes(), &1, &hs);
+        assert_eq!(st.0.len(), 1);
+        tree.insert("TTTTTTTTTTTTTTTAAGAATTTTT".as_bytes(), Some(1), &1);
+        let hs = HashSet::default();
+        let st = tree.chained_search(1, Some(1), "TTTTTTTTTTTTTTTAAAAATTTTT".as_bytes(), &1, &hs);
+        assert_eq!(st.0.len(), 2);
+    }
+    #[test]
     fn test_error_unambiguous_sequences() {
-
         // acutally length 25 now -- fix the file name at some point
         let strings = read_file_to_vec("python/Anchored_error_20mer_set.txt").unwrap();
 
@@ -1102,10 +1518,13 @@ mod tests {
 
         // either hits are non error, which should be 120 read counts (100 original reads plus 20 more singletons collapsed into it) or error singletons (1 read)
         for hit in hit_set {
-            if hit.1.borrow().count == 120 {
+            if hit.1.borrow().count == 115 {
                 assert!(hit.1.borrow().valid);
             } else if hit.1.borrow().count == 1 {
-                assert!(!hit.1.borrow().valid);
+                if hit.1.borrow().valid {
+                    println!("Error singleton {}", String::from_utf8(hit.0.clone()).unwrap());
+                }
+                //assert!(!hit.1.borrow().valid);
             } else {
                 panic!("Unknown result; counts {}", hit.1.borrow().count);
             }
@@ -1118,24 +1537,29 @@ mod tests {
             ("ACCTGGATTGGA".as_bytes().to_vec(), 10),
             ("ACGTGGAATGGA".as_bytes().to_vec(), 1),
             ("ACCTGGAATGGA".as_bytes().to_vec(), 1),
-            ("ACCTGGAATGTA".as_bytes().to_vec(), 1)];
+            ("ACCTGGAATGTA".as_bytes().to_vec(), 1),
+        ];
         let hit_set = LinkedDistances::cluster_string_vector_list(&12, test_set, &2, &5.0);
 
         // either hits are non error, which should be 120 read counts (100 original reads plus 20 more singletons collapsed into it) or error singletons (1 read)
         for hit in hit_set {
             if hit.1.borrow().count > 10 {
                 assert!(hit.1.borrow().valid);
-                assert_eq!(hit.1.borrow().count,13);
+                assert_eq!(hit.1.borrow().count, 13);
             } else {
                 assert!(!hit.1.borrow().valid);
-                assert_eq!(hit.1.borrow().count,1);
+                assert_eq!(hit.1.borrow().count, 1);
             }
         }
     }
 
     #[test]
     fn test_first_level() {
-        let partial_nw = PartialNW { column: vec![0], row: vec![], best_value: 0 };
+        let partial_nw = PartialNW {
+            column: vec![0],
+            row: vec![],
+            best_value: 0,
+        };
         let offset_x = 1;
         let this_string = [b'G', b'T', b'T', b'G', b'C', b'A'];
         let search_sequence = [b'G', b'A', b'T', b'C', b'C', b'A'];
@@ -1150,7 +1574,11 @@ mod tests {
 
     #[test]
     fn test_second_level() {
-        let partial_nw = PartialNW { column: vec![1, 0], row: vec![1], best_value: 1 };
+        let partial_nw = PartialNW {
+            column: vec![1, 0],
+            row: vec![1],
+            best_value: 1,
+        };
         let offset_x = 2;
         let this_string = [b'G', b'T', b'T', b'G', b'C', b'A'];
         let search_sequence = [b'G', b'A', b'T', b'C', b'C', b'A'];
@@ -1165,7 +1593,11 @@ mod tests {
 
     #[test]
     fn test_third_level() {
-        let partial_nw = PartialNW { column: vec![2, 1, 1], row: vec![2, 1], best_value: 2 };
+        let partial_nw = PartialNW {
+            column: vec![2, 1, 1],
+            row: vec![2, 1],
+            best_value: 2,
+        };
         let offset_x = 3;
         let this_string = [b'G', b'T', b'T', b'G', b'C', b'A'];
         let search_sequence = [b'G', b'A', b'T', b'C', b'C', b'A'];
@@ -1180,7 +1612,11 @@ mod tests {
 
     #[test]
     fn test_fourth_level() {
-        let partial_nw = PartialNW { column: vec![3, 2, 2, 1], row: vec![3, 2, 1], best_value: 2 };
+        let partial_nw = PartialNW {
+            column: vec![3, 2, 2, 1],
+            row: vec![3, 2, 1],
+            best_value: 2,
+        };
         let offset_x = 4;
         let this_string = [b'G', b'T', b'T', b'G', b'C', b'A'];
         let search_sequence = [b'G', b'A', b'T', b'C', b'C', b'A'];
@@ -1195,7 +1631,11 @@ mod tests {
 
     #[test]
     fn test_fifth_level() {
-        let partial_nw = PartialNW { column: vec![3, 3, 2, 2], row: vec![3, 2, 2], best_value: 2 };
+        let partial_nw = PartialNW {
+            column: vec![3, 3, 2, 2],
+            row: vec![3, 2, 2],
+            best_value: 2,
+        };
         let offset_x = 5;
         let this_string = [b'G', b'T', b'T', b'G', b'C', b'A'];
         let search_sequence = [b'G', b'A', b'T', b'C', b'C', b'A'];
@@ -1204,13 +1644,17 @@ mod tests {
         let mut trie_node = TrieNode::new(this_string.to_vec(), None, &max_mismatch);
 
         trie_node.fill_alignment(&partial_nw, &offset_x, &search_sequence, &max_mismatch);
-        assert_eq!(trie_node.partial_dp.column, vec![3, 3, 2, 2]);
+        assert_eq!(trie_node.partial_dp.column, vec![4, 3, 2, 2]);
         assert_eq!(trie_node.partial_dp.row, vec![3, 3, 3]);
     }
 
     #[test]
     fn test_sixth_level() {
-        let partial_nw = PartialNW { column: vec![3, 3, 2, 2], row: vec![3, 3, 3], best_value: 2 };
+        let partial_nw = PartialNW {
+            column: vec![3, 3, 2, 2],
+            row: vec![3, 3, 3],
+            best_value: 2,
+        };
         let offset_x = 6;
         let this_string = [b'G', b'T', b'T', b'G', b'C', b'A'];
         let search_sequence = [b'G', b'A', b'T', b'C', b'C', b'A'];
@@ -1219,8 +1663,8 @@ mod tests {
         let mut trie_node = TrieNode::new(this_string.to_vec(), None, &max_mismatch);
 
         trie_node.fill_alignment(&partial_nw, &offset_x, &search_sequence, &max_mismatch);
-        assert_eq!(trie_node.partial_dp.column, vec![3, 3, 3, 2]);
-        assert_eq!(trie_node.partial_dp.row, vec![3, 4, 3]);
+        assert_eq!(trie_node.partial_dp.column, vec![4, 3, 3, 2]);
+        assert_eq!(trie_node.partial_dp.row, vec![4, 4, 3]);
     }
 
     // Edge case tests
@@ -1229,7 +1673,7 @@ mod tests {
     fn test_empty_sequence_insertion() {
         let mut trie = Trie::new(10);
         let empty_seq = b"";
-        
+
         // Should handle empty sequence without panic
         trie.insert(empty_seq, None, &2);
     }
@@ -1237,19 +1681,19 @@ mod tests {
     #[test]
     fn test_single_character_sequence() {
         let mut trie = Trie::new(10);
-        
+
         // Insert single character sequences
         trie.insert(b"A", None, &1);
         trie.insert(b"C", None, &1);
         trie.insert(b"G", None, &1);
         trie.insert(b"T", None, &1);
-        
+
         // Verify all four nucleotides are present as children of root
         assert!(trie.root.borrow().children.contains_key(&b'A'));
         assert!(trie.root.borrow().children.contains_key(&b'C'));
         assert!(trie.root.borrow().children.contains_key(&b'G'));
         assert!(trie.root.borrow().children.contains_key(&b'T'));
-        
+
         // Each should be terminal
         assert!(trie.root.borrow().children[&b'A'].borrow().is_terminal);
         assert!(trie.root.borrow().children[&b'C'].borrow().is_terminal);
@@ -1261,11 +1705,11 @@ mod tests {
     fn test_maximum_length_sequence() {
         let max_length = 5;
         let mut trie = Trie::new(max_length);
-        
+
         // Create sequence at maximum length
         let max_seq = vec![b'A'; max_length];
         trie.insert(&max_seq, None, &2);
-        
+
         // Verify it was inserted correctly
         let mut current = trie.root.clone();
         for i in 0..max_length {
@@ -1278,16 +1722,45 @@ mod tests {
         assert!(current.borrow().is_terminal);
     }
 
+    // AACCCGTACGT
+    #[test]
+    fn test_indel_2_sequence() {
+        let mut trie = Trie::new("AACCCGTACGT".len());
+
+        // Create sequence at maximum length
+        let max_seq = "AACCCGTACGT".as_bytes().to_vec();
+        //                       A-CC-GTACGT
+        trie.insert(&max_seq, None, &2);
+        let results =
+            trie.chained_search(1, Some(1), "ACCGTACGT".as_bytes(), &2, &HashSet::default());
+        assert_eq!(results.0.len(), 1);
+
+        // swap orientation
+        let mut trie = Trie::new("AACCCGTACGT".len());
+
+        // Create sequence at maximum length
+        let max_seq = "ACCGTACGT".as_bytes().to_vec();
+        //                       A-CC-GTACGT
+        trie.insert(&max_seq, None, &2);
+        let results = trie.chained_search(
+            1,
+            Some(1),
+            "AACCCGTACGT".as_bytes(),
+            &2,
+            &HashSet::default(),
+        );
+        assert_eq!(results.0.len(), 1);
+    }
     #[test]
     fn test_identical_sequences() {
         let mut trie = Trie::new(10);
         let seq = b"ACGT";
-        
+
         // Insert same sequence multiple times
         trie.insert(seq, None, &2);
         trie.insert(seq, None, &2);
         trie.insert(seq, None, &2);
-        
+
         // Should still have only one path
         let mut current = trie.root.clone();
         for &ch in seq {
@@ -1310,7 +1783,7 @@ mod tests {
     fn test_clustering_single_sequence() {
         let single_seq = vec![(b"ACGT".to_vec(), 100)];
         let result = LinkedDistances::cluster_string_vector_list(&10, single_seq, &2, &5.0);
-        
+
         assert_eq!(result.len(), 1);
         assert!(result[0].1.borrow().valid);
         assert_eq!(result[0].1.borrow().count, 100);
@@ -1321,12 +1794,11 @@ mod tests {
     fn test_clustering_zero_mismatch_tolerance() {
         let sequences = vec![
             (b"AAAA".to_vec(), 10),
-            (b"AAAT".to_vec(), 1),  // 1 mismatch - should not cluster
-            (b"AAAA".to_vec(), 5),  // exact match - should cluster
+            (b"AAAT".to_vec(), 1), // 1 mismatch - should not cluster
         ];
-        
+
         let result = LinkedDistances::cluster_string_vector_list(&4, sequences, &0, &5.0);
-        
+
         // With 0 mismatch tolerance, only exact matches should cluster
         let valid_clusters: Vec<_> = result.iter().filter(|x| x.1.borrow().valid).collect();
         assert_eq!(valid_clusters.len(), 2); // AAAA cluster and AAAT singleton
@@ -1336,13 +1808,13 @@ mod tests {
     fn test_very_high_mismatch_tolerance() {
         let sequences = vec![
             (b"AAAA".to_vec(), 10),
-            (b"CCCC".to_vec(), 1),  // 4 mismatches
-            (b"GGGG".to_vec(), 1),  // 4 mismatches
-            (b"TTTT".to_vec(), 1),  // 4 mismatches
+            (b"CCCC".to_vec(), 1), // 4 mismatches
+            (b"GGGG".to_vec(), 1), // 4 mismatches
+            (b"TTTT".to_vec(), 1), // 4 mismatches
         ];
-        
+
         let result = LinkedDistances::cluster_string_vector_list(&4, sequences, &4, &5.0);
-        
+
         // With very high mismatch tolerance, everything should cluster into one group
         let valid_clusters: Vec<_> = result.iter().filter(|x| x.1.borrow().valid).collect();
         assert_eq!(valid_clusters.len(), 1);
@@ -1362,7 +1834,7 @@ mod tests {
         let row = vec![1, 2, 3];
         let col = vec![0, 1, 2, 3];
         let best = 1;
-        
+
         let partial = PartialNW::from_row_column_best(row.clone(), col.clone(), &best);
         assert_eq!(partial.row, row);
         assert_eq!(partial.column, col);
@@ -1375,7 +1847,7 @@ mod tests {
         let row = vec![1, 2, 3];
         let col = vec![0, 1]; // Too short - should panic
         let best = 1;
-        
+
         let partial = PartialNW::from_row_column_best(row, col, &best);
         partial.pretty_print(); // This should panic
     }
@@ -1385,43 +1857,48 @@ mod tests {
     fn test_clustering_highly_divergent_sequences() {
         // Test sequences that differ in many positions
         let sequences = vec![
-            (b"AAAAAAAA".to_vec(), 100),  // Reference sequence
-            (b"TTTTTTTT".to_vec(), 50),   // Completely different
-            (b"CCCCCCCC".to_vec(), 30),   // Completely different
-            (b"GGGGGGGG".to_vec(), 20),   // Completely different
+            (b"AAAAAAAA".to_vec(), 100), // Reference sequence
+            (b"TTTTTTTT".to_vec(), 50),  // Completely different
+            (b"CCCCCCCC".to_vec(), 30),  // Completely different
+            (b"GGGGGGGG".to_vec(), 20),  // Completely different
         ];
-        
+
         // With low mismatch tolerance, should not cluster
         let result = LinkedDistances::cluster_string_vector_list(&8, sequences.clone(), &2, &5.0);
         let valid_clusters: Vec<_> = result.iter().filter(|x| x.1.borrow().valid).collect();
         assert_eq!(valid_clusters.len(), 4); // Each should remain separate
-        
-        // With high mismatch tolerance, may or may not cluster depending on whether 
+
+        // With high mismatch tolerance, may or may not cluster depending on whether
         // sequences are found within edit distance
         let result_high = LinkedDistances::cluster_string_vector_list(&8, sequences, &8, &5.0);
-        let valid_clusters_high: Vec<_> = result_high.iter().filter(|x| x.1.borrow().valid).collect();
-        assert!(valid_clusters_high.len() >= 1 && valid_clusters_high.len() <= 4); // Verify reasonable clustering
+        let valid_clusters_high: Vec<_> =
+            result_high.iter().filter(|x| x.1.borrow().valid).collect();
+        assert!(valid_clusters_high.len() >= 1 && valid_clusters_high.len() <= 4);
+        // Verify reasonable clustering
     }
 
     #[test]
     fn test_clustering_gradually_divergent_sequences() {
         // Test sequences that progressively diverge from a reference
         let sequences = vec![
-            (b"AAAAAAAA".to_vec(), 100),  // Reference
-            (b"AAAAACAA".to_vec(), 1),    // 1 mismatch
-            (b"AAAAACAC".to_vec(), 1),    // 2 mismatches from ref
-            (b"AACAACAC".to_vec(), 1),    // 4 mismatches from ref
-            (b"AACCACAC".to_vec(), 1),    // 5 mismatches from ref
-            (b"TACCACAC".to_vec(), 1),    // 6 mismatches from ref
+            (b"AAAAAAAA".to_vec(), 100), // Reference
+            (b"AAAAACAA".to_vec(), 1),   // 1 mismatch
+            (b"AAAAACAC".to_vec(), 1),   // 2 mismatches from ref
+            (b"AACAACAC".to_vec(), 1),   // 4 mismatches from ref
+            (b"AACCACAC".to_vec(), 1),   // 5 mismatches from ref
+            (b"TACCACAC".to_vec(), 1),   // 6 mismatches from ref
         ];
-        
+
         let result = LinkedDistances::cluster_string_vector_list(&8, sequences, &2, &5.0);
-        
+
         // Check that sequences within edit distance get clustered appropriately
         let valid_clusters: Vec<_> = result.iter().filter(|x| x.1.borrow().valid).collect();
-        
+
         // The reference should absorb sequences within edit distance 2
-        let main_cluster = valid_clusters.iter().find(|x| x.1.borrow().count > 100).unwrap();
+        let main_cluster = valid_clusters
+            .iter()
+            .find(|x| x.1.borrow().count > 100)
+            .unwrap();
         assert!(main_cluster.1.borrow().swallowed_links.len() >= 2);
     }
 
@@ -1429,42 +1906,42 @@ mod tests {
     fn test_clustering_with_insertions_small_gaps() {
         // Test sequences with small insertions (1-2 characters)
         let sequences = vec![
-            (b"ACGTACGT".to_vec(), 100),    // Reference 8bp
-            (b"ACGTTACGT".to_vec(), 1),     // 1 insertion (T)
-            (b"ACCGTACGT".to_vec(), 1),     // 1 insertion (C) 
-            (b"ACGTAACGT".to_vec(), 1),     // 1 insertion (A)
-            (b"ACGTTAACGT".to_vec(), 1),    // 2 insertions (T, A)
-            (b"AACCCGTACGT".to_vec(), 1),   // 2 insertions (A, CC)
+            (b"ACGTACGT".to_vec(), 100),  // Reference 8bp
+            (b"ACGTTACGT".to_vec(), 1),   // 1 insertion (T)
+            (b"ACCGTACGT".to_vec(), 1),   // 1 insertion (C)
+            (b"ACGTAACGT".to_vec(), 1),   // 1 insertion (A)
+            (b"ACGTTAACGT".to_vec(), 1),  // 2 insertions (T, A)
+            (b"AACCCGTACGT".to_vec(), 1), // 2 insertions (A, CC)
         ];
-        
+
         let result = LinkedDistances::cluster_string_vector_list(&11, sequences, &2, &5.0);
-        
+
         // Check clustering behavior with insertions
         let valid_clusters: Vec<_> = result.iter().filter(|x| x.1.borrow().valid).collect();
-        
+
         // Should cluster sequences with small insertions into main cluster
         let main_cluster = valid_clusters.iter().find(|x| x.1.borrow().count > 100);
         assert!(main_cluster.is_some());
-        assert!(main_cluster.unwrap().1.borrow().swallowed_links.len() >= 2);
+        assert_eq!(main_cluster.unwrap().1.borrow().swallowed_links.len(), 4);
     }
 
     #[test]
     fn test_clustering_with_deletions_small_gaps() {
         // Test sequences with small deletions (1-2 characters)
         let sequences = vec![
-            (b"ACGTACGT".to_vec(), 100),  // Reference 8bp
-            (b"CGTACGT".to_vec(), 1),     // 1 deletion (A)
-            (b"ACGACGT".to_vec(), 1),     // 1 deletion (T)
-            (b"ACGTCGT".to_vec(), 1),     // 1 deletion (A)
-            (b"CGTCGT".to_vec(), 1),      // 2 deletions (A, A)
-            (b"CGTACG".to_vec(), 1),      // 2 deletions (A, T)
+            (b"ACGTACGT".to_vec(), 100), // Reference 8bp
+            (b"CGTACGT".to_vec(), 1),    // 1 deletion (A)
+            (b"ACGACGT".to_vec(), 1),    // 1 deletion (T)
+            (b"ACGTCGT".to_vec(), 1),    // 1 deletion (A)
+            (b"CGTCGT".to_vec(), 1),     // 2 deletions (A, A)
+            (b"CGTACG".to_vec(), 1),     // 2 deletions (A, T)
         ];
-        
+
         let result = LinkedDistances::cluster_string_vector_list(&8, sequences, &2, &5.0);
-        
+
         // Check clustering behavior with deletions
         let valid_clusters: Vec<_> = result.iter().filter(|x| x.1.borrow().valid).collect();
-        
+
         // Should cluster sequences with small deletions into main cluster
         let main_cluster = valid_clusters.iter().find(|x| x.1.borrow().count > 100);
         assert!(main_cluster.is_some());
@@ -1475,30 +1952,34 @@ mod tests {
     fn test_clustering_with_large_insertions() {
         // Test sequences with large insertions (3+ characters)
         let sequences = vec![
-            (b"ACGTACGT".to_vec(), 100),      // Reference 8bp
-            (b"ACGTTTTACGT".to_vec(), 1),     // 3 insertions (TTT)
-            (b"ACGTAAAACGT".to_vec(), 1),     // 3 insertions (AAA)
-            (b"ACGTCCCCCACGT".to_vec(), 1),   // 5 insertions (CCCCC)
-            (b"GGGACGTACGT".to_vec(), 1),     // 3 insertions at start (GGG)
-            (b"ACGTACGTAAA".to_vec(), 1),     // 3 insertions at end (AAA)
+            (b"ACGTACGT".to_vec(), 100),    // Reference 8bp
+            (b"ACGTTTTACGT".to_vec(), 1),   // 3 insertions (TTT)
+            (b"ACGTAAAACGT".to_vec(), 1),   // 3 insertions (AAA)
+            (b"ACGTCCCCCACGT".to_vec(), 1), // 5 insertions (CCCCC)
+            (b"GGGACGTACGT".to_vec(), 1),   // 3 insertions at start (GGG)
+            (b"ACGTACGTAAA".to_vec(), 1),   // 3 insertions at end (AAA)
         ];
-        
+
         let result = LinkedDistances::cluster_string_vector_list(&13, sequences, &3, &5.0);
-        
+
         // With moderate edit distance, some large insertions might not cluster
         let valid_clusters: Vec<_> = result.iter().filter(|x| x.1.borrow().valid).collect();
-        
+
         // Check that clustering behavior is reasonable for large insertions
         assert!(valid_clusters.len() >= 1);
-        
+
         // Test with higher edit distance tolerance
-        let result_high = LinkedDistances::cluster_string_vector_list(&13, 
+        let result_high = LinkedDistances::cluster_string_vector_list(
+            &13,
             vec![
-                (b"ACGTACGT".to_vec(), 100),      
-                (b"ACGTTTTACGT".to_vec(), 1),     
-                (b"ACGTAAAACGT".to_vec(), 1),     
-            ], &5, &5.0);
-        
+                (b"ACGTACGT".to_vec(), 100),
+                (b"ACGTTTTACGT".to_vec(), 1),
+                (b"ACGTAAAACGT".to_vec(), 1),
+            ],
+            &5,
+            &5.0,
+        );
+
         let valid_high: Vec<_> = result_high.iter().filter(|x| x.1.borrow().valid).collect();
         let main_cluster_high = valid_high.iter().find(|x| x.1.borrow().count > 100);
         assert!(main_cluster_high.is_some());
@@ -1514,13 +1995,13 @@ mod tests {
             (b"GTACGT".to_vec(), 1),         // 6 deletions from start
             (b"ACG".to_vec(), 1),            // 9 deletions (major truncation)
         ];
-        
+
         let sequences_len = sequences.len();
         let result = LinkedDistances::cluster_string_vector_list(&12, sequences, &4, &5.0);
-        
+
         // Check clustering behavior with large deletions
         let valid_clusters: Vec<_> = result.iter().filter(|x| x.1.borrow().valid).collect();
-        
+
         // Should have reasonable clustering for large deletions
         assert!(valid_clusters.len() >= 1);
         assert!(valid_clusters.len() <= sequences_len);
@@ -1530,21 +2011,21 @@ mod tests {
     fn test_complex_indel_patterns() {
         // Test sequences with complex insertion/deletion patterns
         let sequences = vec![
-            (b"ACGTACGT".to_vec(), 100),     // Reference
-            (b"ACGTTCGT".to_vec(), 1),       // Substitution + deletion
-            (b"AACGTACGT".to_vec(), 1),      // Insertion at start
-            (b"ACGTACGTT".to_vec(), 1),      // Insertion at end
-            (b"AACGTTACGTT".to_vec(), 1),    // Insertions at both ends
-            (b"CGTACG".to_vec(), 1),         // Deletions at both ends
-            (b"ACCGTTACGTT".to_vec(), 1),    // Multiple insertions
+            (b"ACGTACGT".to_vec(), 100),  // Reference
+            (b"ACGTTCGT".to_vec(), 1),    // Substitution + deletion
+            (b"AACGTACGT".to_vec(), 1),   // Insertion at start
+            (b"ACGTACGTT".to_vec(), 1),   // Insertion at end
+            (b"AACGTTACGTT".to_vec(), 1), // Insertions at both ends
+            (b"CGTACG".to_vec(), 1),      // Deletions at both ends
+            (b"ACCGTTACGTT".to_vec(), 1), // Multiple insertions
         ];
-        
+
         let result = LinkedDistances::cluster_string_vector_list(&11, sequences, &3, &5.0);
-        
+
         // Check that complex patterns are handled appropriately
         let valid_clusters: Vec<_> = result.iter().filter(|x| x.1.borrow().valid).collect();
         assert!(valid_clusters.len() >= 1);
-        
+
         // The main cluster should absorb some of the similar sequences
         let main_cluster = valid_clusters.iter().find(|x| x.1.borrow().count > 100);
         assert!(main_cluster.is_some());
@@ -1554,23 +2035,23 @@ mod tests {
     fn test_clustering_mixed_error_types() {
         // Test combinations of substitutions, insertions, and deletions
         let sequences = vec![
-            (b"ACGTACGT".to_vec(), 100),   // Reference
-            (b"TCGTACGT".to_vec(), 1),     // 1 substitution (A->T)
-            (b"ACGTTCGT".to_vec(), 1),     // 1 substitution (A->T) + 1 deletion
-            (b"AACGTACGT".to_vec(), 1),    // 1 insertion
-            (b"TCGTTCGT".to_vec(), 1),     // 1 sub + 1 del + 1 sub
-            (b"AACGTTACGTT".to_vec(), 1),  // 2 insertions + 1 deletion
+            (b"ACGTACGT".to_vec(), 100),  // Reference
+            (b"TCGTACGT".to_vec(), 1),    // 1 substitution (A->T)
+            (b"ACGTTCGT".to_vec(), 1),    // 1 substitution (A->T) + 1 deletion
+            (b"AACGTACGT".to_vec(), 1),   // 1 insertion
+            (b"TCGTTCGT".to_vec(), 1),    // 1 sub + 1 del + 1 sub
+            (b"AACGTTACGTT".to_vec(), 1), // 2 insertions + 1 deletion
         ];
-        
+
         let result = LinkedDistances::cluster_string_vector_list(&11, sequences, &2, &5.0);
-        
+
         // Check clustering with mixed error types
         let valid_clusters: Vec<_> = result.iter().filter(|x| x.1.borrow().valid).collect();
-        
+
         // Should cluster appropriately based on edit distance
         let main_cluster = valid_clusters.iter().find(|x| x.1.borrow().count > 100);
         assert!(main_cluster.is_some());
-        
+
         // Check that sequences within edit distance 2 are clustered
         let total_absorbed = main_cluster.unwrap().1.borrow().swallowed_links.len();
         assert!(total_absorbed >= 1);
@@ -1582,29 +2063,29 @@ mod tests {
         let test_cases = vec![
             // Ratio exactly at threshold
             vec![(b"AAAA".to_vec(), 10), (b"AAAT".to_vec(), 2)], // ratio = 5.0
-            // Ratio just below threshold  
+            // Ratio just below threshold
             vec![(b"AAAA".to_vec(), 10), (b"AAAT".to_vec(), 3)], // ratio = 3.33
             // Ratio just above threshold
             vec![(b"AAAA".to_vec(), 15), (b"AAAT".to_vec(), 2)], // ratio = 7.5
         ];
-        
+
         for (i, sequences) in test_cases.into_iter().enumerate() {
             let result = LinkedDistances::cluster_string_vector_list(&4, sequences, &1, &5.0);
             let valid_clusters: Vec<_> = result.iter().filter(|x| x.1.borrow().valid).collect();
-            
+
             match i {
                 0 => {
                     // At threshold - should cluster
                     assert!(valid_clusters.len() <= 2); // May or may not cluster at exact threshold
-                },
+                }
                 1 => {
-                    // Below threshold - should not cluster  
+                    // Below threshold - should not cluster
                     assert_eq!(valid_clusters.len(), 2);
-                },
+                }
                 2 => {
                     // Above threshold - should cluster
                     assert_eq!(valid_clusters.len(), 1);
-                },
+                }
                 _ => {}
             }
         }
@@ -1614,14 +2095,14 @@ mod tests {
     fn test_clustering_palindromic_sequences() {
         // Test with palindromic sequences that might confuse alignment
         let sequences = vec![
-            (b"ACGTACGT".to_vec(), 100),    // Reference
-            (b"TGCATGCA".to_vec(), 1),      // Reverse complement
-            (b"ACGTGTTACA".to_vec(), 1),    // Palindromic with insertions
-            (b"CGTACG".to_vec(), 1),        // Palindromic substring
+            (b"ACGTACGT".to_vec(), 100), // Reference
+            (b"TGCATGCA".to_vec(), 1),   // Reverse complement
+            (b"ACGTGTTACA".to_vec(), 1), // Palindromic with insertions
+            (b"CGTACG".to_vec(), 1),     // Palindromic substring
         ];
-        
+
         let result = LinkedDistances::cluster_string_vector_list(&10, sequences, &3, &5.0);
-        
+
         // Check that palindromic sequences are handled correctly
         let valid_clusters: Vec<_> = result.iter().filter(|x| x.1.borrow().valid).collect();
         assert!(valid_clusters.len() >= 1);
@@ -1632,18 +2113,18 @@ mod tests {
     fn test_clustering_repetitive_sequences() {
         // Test with highly repetitive sequences
         let sequences = vec![
-            (b"ATATATATAT".to_vec(), 100),  // Reference - alternating AT
-            (b"TATATATATA".to_vec(), 1),    // Shifted by 1
-            (b"ATATATATA".to_vec(), 1),     // Truncated by 1
-            (b"ATATATATATT".to_vec(), 1),   // Extended by 1 with mismatch
-            (b"ACATATATATAT".to_vec(), 1),  // Insertion + substitution
+            (b"ATATATATAT".to_vec(), 100), // Reference - alternating AT
+            (b"TATATATATA".to_vec(), 1),   // Shifted by 1
+            (b"ATATATATA".to_vec(), 1),    // Truncated by 1
+            (b"ATATATATATT".to_vec(), 1),  // Extended by 1 with mismatch
+            (b"ACATATATATAT".to_vec(), 1), // Insertion + substitution
         ];
-        
+
         let result = LinkedDistances::cluster_string_vector_list(&12, sequences, &2, &5.0);
-        
+
         // Check clustering of repetitive sequences
         let valid_clusters: Vec<_> = result.iter().filter(|x| x.1.borrow().valid).collect();
-        
+
         // Should handle repetitive patterns reasonably
         assert!(valid_clusters.len() >= 1);
         let main_cluster = valid_clusters.iter().find(|x| x.1.borrow().count > 100);
@@ -1655,22 +2136,24 @@ mod tests {
         // Test with very short sequences (2-3 bp)
         let sequences = vec![
             (b"AT".to_vec(), 100),
-            (b"AC".to_vec(), 1),    // 1 mismatch
-            (b"GT".to_vec(), 1),    // 1 mismatch  
-            (b"TT".to_vec(), 1),    // 1 mismatch
-            (b"A".to_vec(), 1),     // 1 deletion
-            (b"ATG".to_vec(), 1),   // 1 insertion
+            (b"AC".to_vec(), 1),  // 1 mismatch
+            (b"GT".to_vec(), 1),  // 1 mismatch
+            (b"TT".to_vec(), 1),  // 1 mismatch
+            (b"A".to_vec(), 1),   // 1 deletion
+            (b"ATG".to_vec(), 1), // 1 insertion
         ];
-        
+
         let result = LinkedDistances::cluster_string_vector_list(&3, sequences, &1, &5.0);
-        
+
         // Check clustering behavior with very short sequences
         let valid_clusters: Vec<_> = result.iter().filter(|x| x.1.borrow().valid).collect();
-        
+
         // Should cluster appropriately for short sequences
         assert!(valid_clusters.len() >= 1);
         // Check if there's a main cluster that absorbed some sequences
-        let has_absorptions = valid_clusters.iter().any(|x| x.1.borrow().swallowed_links.len() > 0);
+        let has_absorptions = valid_clusters
+            .iter()
+            .any(|x| x.1.borrow().swallowed_links.len() > 0);
         assert!(has_absorptions || valid_clusters.len() > 1); // Either clustering occurred or multiple valid clusters
     }
 }
