@@ -649,7 +649,9 @@ impl Trie {
             String::from_utf8(seq.to_vec()).unwrap(),
             depth_to_return.unwrap_or(999)
         );
-        assert!(seq.len() <= self.max_height && seq.len() > 0);
+        if !(seq.len() <= self.max_height && seq.len() > 0) {
+            panic!("Sequence length cannot be greater than max_height or zero, sequence provided:{}:",String::from_utf8(seq.to_vec()).unwrap());
+        }
 
         let mut current_node = Link {
             0: Rc::clone(&self.root),
@@ -1328,7 +1330,6 @@ mod tests {
 
         let node_g = binding.children.get(&b'G').unwrap();
         assert!(node_g.borrow().is_terminal);
-        // TODO assert_eq!(node_g.borrow().sequence_id, 1); // the null sequence is sequence 0; we're sequence 1
     }
 
     #[test]
@@ -1349,7 +1350,6 @@ mod tests {
             let binding = node_c.borrow();
             let node_g = binding.children.get(&b'G').unwrap();
             assert!(node_g.borrow().is_terminal);
-            // TODO assert_eq!(node_g.borrow().sequence_id, 1);
         }
 
         // Check "ACC"
@@ -1361,7 +1361,6 @@ mod tests {
             let binding = node_c.borrow();
             let node_c2 = binding.children.get(&b'C').unwrap();
             assert!(node_c2.borrow().is_terminal);
-            // TODO assert_eq!(node_c2.borrow().sequence_id, 2);
         }
 
         // Check "TGCA"
@@ -1379,7 +1378,6 @@ mod tests {
 
             let node_a = binding.children.get(&b'A').unwrap();
             assert!(node_a.borrow().is_terminal);
-            // TODO assert_eq!(node_a.borrow().sequence_id, 3);
         }
     }
 
@@ -1669,7 +1667,7 @@ mod tests {
 
     // Edge case tests
     #[test]
-    #[should_panic(expected = "assertion failed")]
+    #[should_panic(expected = "Sequence length cannot be greater than max_height or zero, sequence provided::")]
     fn test_empty_sequence_insertion() {
         let mut trie = Trie::new(10);
         let empty_seq = b"";
