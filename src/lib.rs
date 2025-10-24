@@ -1288,6 +1288,7 @@ impl LinkedDistances {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
     use std::io;
 
     use super::*;
@@ -2022,11 +2023,95 @@ mod tests {
 
         // Check that complex patterns are handled appropriately
         let valid_clusters: Vec<_> = result.iter().filter(|x| x.1.borrow().valid).collect();
-        assert!(valid_clusters.len() >= 1);
+        assert!(valid_clusters.len() == 1);
 
         // The main cluster should absorb some of the similar sequences
         let main_cluster = valid_clusters.iter().find(|x| x.1.borrow().count > 100);
         assert!(main_cluster.is_some());
+    }
+
+
+    #[test]
+    fn test_chained_patterns() {
+        // Test sequences with complex insertion/deletion patterns
+        let sequences = vec![
+            (b"AAGGCGAGCACA".to_vec(), 100),  // real sequence
+            (b"AAGGCGAGCACC".to_vec(), 25),    // last A to a C
+            (b"AAGGCGAGCCCC".to_vec(), 10),   // last A to a C, 3rd to last A to a C
+            (b"ACGGCGAGCCCC".to_vec(), 1),   // last A to a C, 3rd to last A to a C, first A to C
+        ];
+
+        let result = LinkedDistances::cluster_string_vector_list(&12, sequences, &1, &2.0);
+
+        // Check that complex patterns are handled appropriately
+        let valid_clusters: Vec<_> = result.iter().filter(|x| x.1.borrow().valid).collect();
+        valid_clusters.iter().for_each(|x| {
+            println!("{} -> {}", String::from_utf8(x.0.clone()).unwrap(), x.1.borrow().count);
+            x.1.borrow().swallowed_links.iter().for_each(|(name,link)| {
+                println!("swallowed {} -> {}", String::from_utf8(name.clone()).unwrap(), link);
+            });
+
+        });
+        let valid_clusters: Vec<_> = result.iter().collect();
+        valid_clusters.iter().for_each(|x| {
+            println!("ALL {} -> {}", String::from_utf8(x.0.clone()).unwrap(), x.1.borrow().count);
+            x.1.borrow().swallowed_links.iter().for_each(|(name,link)| {
+                println!("swallowed {} -> {}", String::from_utf8(name.clone()).unwrap(), link);
+            });
+
+        });
+        assert_eq!(valid_clusters.len(), 1);
+
+        // The main cluster should absorb some of the similar sequences
+        let main_cluster = valid_clusters.iter().find(|x| x.1.borrow().count > 100);
+        assert!(main_cluster.is_some());
+    }
+
+
+    #[test]
+    fn test_collapse_down_set() {
+        // Test sequences with complex insertion/deletion patterns
+        let sequences = vec![
+            (b"AAGGCGAGCACA".to_vec(), 100),  // real sequence
+            (b"AAGGCGAGCACC".to_vec(), 25),    // last A to a C
+            (b"AAGGCGAGCCCC".to_vec(), 10),   // last A to a C, 3rd to last A to a C
+            (b"ACGGCGAGCCCC".to_vec(), 1),   // last A to a C, 3rd to last A to a C, first A to C
+        ];
+
+        let result: HashMap<Vec<u8>,Link<DistanceGraphNode>> = LinkedDistances::cluster_string_vector_list(&12, sequences, &1, &2.0).into_iter().collect();
+        let valid_clusters: Vec<_> = result.iter().filter(|x| x.1.borrow().valid).collect();
+
+        let mut knowns: HashMap<Vec<u8>, Vec<u8>> = HashMap::default();
+        let mut barcodes_to_resolve : VecDeque<Vec<u8>> = VecDeque::new();
+
+        valid_clusters.into_iter().for_each(|(_center, dist_graph)| {
+            let connected_node = dist_graph.borrow_mut();
+            let connected_node: &DistanceGraphNode = connected_node.deref().to_owned();
+            let string_name = connected_node.string.clone();
+            println!("BASE {} -> {} (size {})", String::from_utf8(string_name.clone()).unwrap(), connected_node.count, connected_node.swallowed_links.len());
+            knowns.insert(string_name.clone(), string_name.clone());
+            connected_node.swallowed_links.iter().for_each(|(x, y)| {
+                println!("CON {} -> {}", String::from_utf8(x.clone()).unwrap(), String::from_utf8(string_name.clone()).unwrap());
+                barcodes_to_resolve.push_front(x.clone());
+                knowns.insert(x.clone(), string_name.clone());
+            });
+
+            while barcodes_to_resolve.len() > 0 {
+                let processing_code = barcodes_to_resolve.pop_front().unwrap();
+                let connected_node = result.get(&processing_code).unwrap().borrow_mut();
+                let connected_node: &DistanceGraphNode = connected_node.deref().to_owned();
+
+                connected_node.swallowed_links.iter().for_each(|(x, y)| {
+                    println!("deep CON {} -> {}", String::from_utf8(x.clone()).unwrap(), String::from_utf8(string_name.clone()).unwrap());
+                    barcodes_to_resolve.push_front(x.clone());
+                    knowns.insert(x.clone(), string_name.clone());
+                });
+            }
+        });
+
+        knowns.iter().for_each(|(x,y)| {
+            println!("FINAL {} -> {}", String::from_utf8(x.clone()).unwrap(), String::from_utf8(y.clone()).unwrap());
+        })
     }
 
     #[test]
